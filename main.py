@@ -1,215 +1,117 @@
 """
 WebBox - 网页全屏盒子
-使用PyQt5 QWebEngineView实现全屏网页展示
 """
 
 import sys
-import json
 import os
 import traceback
-from pathlib import Path
+from datetime import datetime
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+# 写日志函数
+def log(msg):
+    try:
+        if getattr(sys, 'frozen', False):
+            log_path = os.path.join(os.path.dirname(sys.executable), 'webbox.log')
+        else:
+            log_path = os.path.join(os.path.dirname(__file__), 'webbox.log')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(f"[{datetime.now()}] {msg}\n")
+    except:
+        pass
 
+log("=== WebBox 启动 ===")
+
+try:
+    log("导入 PyQt5...")
+    from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
+    from PyQt5.QtCore import Qt
+    log("PyQt5 导入成功")
+    
+    log("导入 WebEngine...")
+    from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+    log("WebEngine 导入成功")
+    
+    import json
+    from pathlib import Path
+    from PyQt5.QtCore import QUrl, QTimer
+    from PyQt5.QtGui import QIcon
+    
+except Exception as e:
+    log(f"导入失败: {e}\n{traceback.format_exc()}")
+    raise
 
 class WebBoxWindow(QMainWindow):
-    """全屏网页盒子主窗口"""
-    
-    def __init__(self, config_path: str = None):
+    def __init__(self):
         super().__init__()
+        log("初始化窗口...")
         
-        self.config = self._load_config(config_path)
-        self.current_index = self.config.get('default_index', 0)
-        self.websites = self.config.get('websites', [])
-        
-        if config_path:
-            self.config_file = Path(config_path)
-        else:
-            self.config_file = self._get_config_path()
-        
-        self._init_ui()
-        self._connect_signals()
-        
-        # 延迟加载网页
-        QTimer.singleShot(100, self._load_current_website)
-    
-    def _get_config_path(self):
-        if getattr(sys, 'frozen', False):
-            base_path = Path(sys.executable).parent
-        else:
-            base_path = Path(__file__).parent
-        return base_path / 'webbox_config.json'
-    
-    def _load_config(self, config_path: str = None) -> dict:
-        if config_path:
-            config_file = Path(config_path)
-        else:
-            config_file = self._get_config_path()
-        
-        default_config = {
-            'websites': [{'name': '默认', 'url': 'https://www.baidu.com'}],
-            'default_index': 0,
-            'hotkeys': {
-                'quit': ['Escape', 'Ctrl+Q'],
-                'next': ['Ctrl+Right'],
-                'prev': ['Ctrl+Left'],
-                'reload': ['F5', 'Ctrl+R']
-            },
-            'window': {'fullscreen': True}
-        }
-        
-        if config_file.exists():
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    user_config = json.load(f)
-                    default_config.update(user_config)
-            except Exception as e:
-                print(f"配置文件加载失败: {e}")
-        
-        return default_config
-    
-    def _get_resource_path(self, relative_path):
-        if getattr(sys, 'frozen', False):
-            base_path = Path(sys._MEIPASS)
-        else:
-            base_path = Path(__file__).parent
-        return str(base_path / relative_path)
-    
-    def _init_ui(self):
-        icon_path = self._get_resource_path('Kunzhancheng.ico')
-        if Path(icon_path).exists():
-            self.setWindowIcon(QIcon(icon_path))
-        
-        self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnTopHint
-        )
-        
-        if self.config.get('window', {}).get('fullscreen', True):
-            self.showFullScreen()
-        else:
-            self.resize(1280, 720)
-        
-        self.setStyleSheet("background-color: #1a1a1a;")
-        
-        # 创建WebEngineView
-        self.web_view = QWebEngineView(self)
-        self.setCentralWidget(self.web_view)
-        
-        # 配置设置
-        settings = self.web_view.settings()
-        settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
-        settings.setAttribute(QWebEngineSettings.FullScreenSupportEnabled, True)
-        settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.AutoLoadImages, True)
-        
-        self.web_view.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        
-        # 设置UserAgent
         try:
-            profile = self.web_view.page().profile()
-            profile.setHttpUserAgent(
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            )
-        except:
-            pass
-    
-    def _connect_signals(self):
-        self.web_view.loadStarted.connect(self.on_load_started)
-        self.web_view.loadFinished.connect(self.on_load_finished)
-        self.web_view.loadProgress.connect(self.on_load_progress)
-    
-    def _load_current_website(self):
-        if 0 <= self.current_index < len(self.websites):
-            site = self.websites[self.current_index]
-            url = site.get('url', '')
-            if url:
-                print(f"加载网站: {site.get('name', '未命名')} - {url}")
-                self.web_view.setUrl(QUrl(url))
-    
-    def on_load_started(self):
-        print("开始加载...")
-    
-    def on_load_finished(self, success: bool):
-        if success:
-            print("页面加载成功")
-        else:
-            print("页面加载失败")
-            QTimer.singleShot(3000, lambda: self.web_view.setHtml(
-                '<html><body style="background:#1a1a1a;color:white;display:flex;'
-                'justify-content:center;align-items:center;font-family:sans-serif;">'
-                '<div style="text-align:center;"><h2>页面加载失败</h2>'
-                '<p>请检查网络连接或配置文件中填写的网址</p></div></body></html>'
-            ))
-    
-    def on_load_progress(self, progress: int):
-        pass
+            self.setWindowTitle("WebBox v1.8")
+            self.resize(1280, 720)
+            
+            # 创建WebEngineView
+            log("创建WebEngineView...")
+            self.web_view = QWebEngineView(self)
+            self.setCentralWidget(self.web_view)
+            
+            # 配置设置
+            settings = self.web_view.settings()
+            settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+            
+            # 加载默认网页
+            log("加载网页...")
+            self.web_view.setUrl(QUrl("https://www.baidu.com"))
+            
+            log("窗口初始化完成")
+            
+        except Exception as e:
+            log(f"窗口初始化失败: {e}\n{traceback.format_exc()}")
+            raise
     
     def keyPressEvent(self, event):
-        key = event.key()
-        modifiers = event.modifiers()
-        
-        if key == Qt.Key_Escape or (key == Qt.Key_Q and modifiers == Qt.ControlModifier):
+        if event.key() == Qt.Key_Escape:
             self.close()
-            return
-        
-        if key == Qt.Key_Right and modifiers == Qt.ControlModifier:
-            self.next_website()
-            return
-        
-        if key == Qt.Key_Left and modifiers == Qt.ControlModifier:
-            self.prev_website()
-            return
-        
-        if key == Qt.Key_F5 or (key == Qt.Key_R and modifiers == Qt.ControlModifier):
-            self.web_view.reload()
-            return
-        
-        super().keyPressEvent(event)
-    
-    def next_website(self):
-        if len(self.websites) > 1:
-            self.current_index = (self.current_index + 1) % len(self.websites)
-            self._load_current_website()
-    
-    def prev_website(self):
-        if len(self.websites) > 1:
-            self.current_index = (self.current_index - 1) % len(self.websites)
-            self._load_current_website()
+        else:
+            super().keyPressEvent(event)
     
     def closeEvent(self, event):
-        print("退出WebBox")
+        log("退出WebBox")
         event.accept()
 
 
 def main():
     try:
-        # 启用高DPI支持
+        log("main() 开始")
+        
+        # 启用高DPI
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
         
+        log("创建 QApplication...")
         app = QApplication(sys.argv)
-        app.setApplicationName("WebBox")
-        app.setApplicationVersion("1.7.0")
-        app.setQuitOnLastWindowClosed(True)
+        log("QApplication 创建成功")
         
+        log("创建窗口...")
         window = WebBoxWindow()
         window.show()
+        log("窗口显示成功")
         
+        log("进入主循环...")
         sys.exit(app.exec_())
         
     except Exception as e:
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("WebBox 启动错误", f"错误: {str(e)}\n\n详细信息:\n{traceback.format_exc()}")
+        log(f"main() 错误: {e}\n{traceback.format_exc()}")
+        
+        # 尝试用tkinter显示错误
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("WebBox 错误", f"启动失败:\n{e}\n\n请查看webbox.log文件")
+        except:
+            pass
+        
         sys.exit(1)
 
 
