@@ -25,29 +25,35 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt5==5.15.10 PyQtWebEngine==5.15.6 pyinstaller
     
-    - name: Build with PyInstaller (onedir mode)
+    - name: Build with PyInstaller
       shell: pwsh
       run: |
         @"
         # -*- mode: python ; coding: utf-8 -*-
-        from PyInstaller.utils.hooks import collect_all
+        from PyInstaller.utils.hooks import collect_data_files, collect_submodules
         
         block_cipher = None
         
-        # 加衏PyQt5分析PeQtWebEngine市场于它
-        pyqt5_datas, pyqt5_binaries, pyqt5_hiddenimports = collect_all("PyQt5")
-        webengine_datas, webengine_binaries, webengine_hiddenimports = collect_all("PyQtWebEngine")
+        # 奖胬変查验下公又含件格
+        hiddenimports = [
+            "PyQt5.QtCore",
+            "PyQt5.QtGui", 
+            "PyQt5.QtWidgets",
+            "PyQt5.QtWebEngineWidgets",
+            "PyQt5.QtWebEngineCore",
+            "PyQt5.QtNetwork",
+            "PyQt5.sip",
+            "PyQt5.QtWebChannel",
+        ]
         
-        # 安全
-        all_datas = pyqt5_datas + webengine_datas
-        all_binaries = pyqt5_binaries + webengine_binaries
-        all_hiddenimports = pyqt5_hiddenimports + webengine_hiddenimports
+        # 完成名称分析时的包失
+        datas = collect_data_files("PyQt5") + [("webbox_config.json", "."), ("Kunzhancheng.ico", ".")]
         
-        a = Analysis("main.py",
+        a = Analysis(["main.py"],
                      pathex=[],
-                    binaries=all_binaries,
-                    datas=all_datas + [("webbox_config.json", "."), ("Kunzhancheng.ico", ".")],
-                    hiddenimports=all_hiddenimports,
+                    binaries=[],
+                    datas=datas,
+                    hiddenimports=hiddenimports,
                     hookpath=[],
                     runtime_hooks=[],
                     excludes=[],
