@@ -9,39 +9,10 @@ import os
 import traceback
 from pathlib import Path
 
-def main():
-    try:
-        from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-        from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
-        from PyQt5.QtGui import QIcon
-        
-        # WebEngine必须在QApplication创建前导入
-        from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineSettings
-        
-        # 启用高DPI支持
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-        
-        app = QApplication(sys.argv)
-        app.setApplicationName("WebBox")
-        app.setApplicationVersion("1.6.0")
-        app.setQuitOnLastWindowClosed(True)
-        
-        app.setStyleSheet("QMainWindow { background-color: #1a1a1a; }")
-        
-        # 创建主窗口
-        window = WebBoxWindow()
-        window.show()
-        
-        sys.exit(app.exec_())
-        
-    except Exception as e:
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("WebBox 启动错误", f"错误: {str(e)}\n\n{traceback.format_exc()}")
-        sys.exit(1)
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 
 
 class WebBoxWindow(QMainWindow):
@@ -50,26 +21,20 @@ class WebBoxWindow(QMainWindow):
     def __init__(self, config_path: str = None):
         super().__init__()
         
-        try:
-            self.config = self._load_config(config_path)
-            self.current_index = self.config.get('default_index', 0)
-            self.websites = self.config.get('websites', [])
-            
-            if config_path:
-                self.config_file = Path(config_path)
-            else:
-                self.config_file = self._get_config_path()
-            
-            self._init_ui()
-            self._connect_signals()
-            
-            # 延迟加载网页
-            QTimer.singleShot(100, self._load_current_website)
-            
-        except Exception as e:
-            print(f"初始化错误: {e}")
-            traceback.print_exc()
-            raise
+        self.config = self._load_config(config_path)
+        self.current_index = self.config.get('default_index', 0)
+        self.websites = self.config.get('websites', [])
+        
+        if config_path:
+            self.config_file = Path(config_path)
+        else:
+            self.config_file = self._get_config_path()
+        
+        self._init_ui()
+        self._connect_signals()
+        
+        # 延迟加载网页
+        QTimer.singleShot(100, self._load_current_website)
     
     def _get_config_path(self):
         if getattr(sys, 'frozen', False):
@@ -114,11 +79,8 @@ class WebBoxWindow(QMainWindow):
         return str(base_path / relative_path)
     
     def _init_ui(self):
-        from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
-        
         icon_path = self._get_resource_path('Kunzhancheng.ico')
         if Path(icon_path).exists():
-            from PyQt5.QtGui import QIcon
             self.setWindowIcon(QIcon(icon_path))
         
         self.setWindowFlags(
@@ -187,8 +149,7 @@ class WebBoxWindow(QMainWindow):
             ))
     
     def on_load_progress(self, progress: int):
-        if progress % 20 == 0:
-            print(f"加载进度: {progress}%")
+        pass
     
     def keyPressEvent(self, event):
         key = event.key()
@@ -210,15 +171,6 @@ class WebBoxWindow(QMainWindow):
             self.web_view.reload()
             return
         
-        if key == Qt.Key_F12:
-            try:
-                page = self.web_view.page()
-                if hasattr(page, 'toggleDevTools'):
-                    page.toggleDevTools()
-            except:
-                pass
-            return
-        
         super().keyPressEvent(event)
     
     def next_website(self):
@@ -234,6 +186,31 @@ class WebBoxWindow(QMainWindow):
     def closeEvent(self, event):
         print("退出WebBox")
         event.accept()
+
+
+def main():
+    try:
+        # 启用高DPI支持
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        
+        app = QApplication(sys.argv)
+        app.setApplicationName("WebBox")
+        app.setApplicationVersion("1.7.0")
+        app.setQuitOnLastWindowClosed(True)
+        
+        window = WebBoxWindow()
+        window.show()
+        
+        sys.exit(app.exec_())
+        
+    except Exception as e:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("WebBox 启动错误", f"错误: {str(e)}\n\n详细信息:\n{traceback.format_exc()}")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
