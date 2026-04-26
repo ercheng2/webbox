@@ -15,7 +15,7 @@ def get_config_path():
 
 def load_config():
     config_file = get_config_path()
-    default = {'url': 'https://www.baidu.com', 'title': 'WebBox'}
+    default = {'url': '', 'title': 'WebBox'}
     if config_file.exists():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -31,24 +31,19 @@ def save_config(data):
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-CONFIG = load_config()
-
 # ===== API =====
 class SettingsApi:
     def __init__(self):
         self.settings_window = None
-        self.browse_window = None
     
     def set_window(self, win):
         self.settings_window = win
     
     def get_config(self):
-        return CONFIG
+        return load_config()
     
     def start_browse(self, url, title):
         """保存配置并打开网页"""
-        global CONFIG
-        
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -58,18 +53,18 @@ class SettingsApi:
             url = 'https://' + url
         
         # 保存配置
-        CONFIG = {
+        config = {
             'url': url,
             'title': title.strip() or 'WebBox'
         }
-        save_config(CONFIG)
+        save_config(config)
         
-        # 隐藏设置窗口（不关闭，否则整个程序会退出）
+        # 隐藏设置窗口
         if self.settings_window:
             self.settings_window.hide()
         
         # 打开全屏网页
-        self.browse_window = webview.create_window(CONFIG['title'], url, fullscreen=True)
+        webview.create_window(config['title'], url, fullscreen=True)
         
         return {'ok': True}
 
@@ -209,18 +204,23 @@ titleInput.addEventListener('keydown', function(e) {
 
 # ===== 主程序 =====
 def main():
-    api = SettingsApi()
+    config = load_config()
     
-    # 创建设置窗口
-    settings_win = webview.create_window(
-        'WebBox 设置',
-        html=SETTINGS_HTML,
-        js_api=api,
-        width=540,
-        height=480,
-        resizable=False
-    )
-    api.set_window(settings_win)
+    # 有配置，直接打开全屏网页
+    if config.get('url'):
+        webview.create_window(config.get('title', 'WebBox'), config['url'], fullscreen=True)
+    else:
+        # 没配置，显示设置窗口
+        api = SettingsApi()
+        settings_win = webview.create_window(
+            'WebBox 设置',
+            html=SETTINGS_HTML,
+            js_api=api,
+            width=540,
+            height=480,
+            resizable=False
+        )
+        api.set_window(settings_win)
     
     webview.start()
 
