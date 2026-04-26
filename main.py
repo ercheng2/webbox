@@ -37,6 +37,7 @@ CONFIG = load_config()
 class SettingsApi:
     def __init__(self):
         self.settings_window = None
+        self.browse_window = None
     
     def set_window(self, win):
         self.settings_window = win
@@ -63,12 +64,12 @@ class SettingsApi:
         }
         save_config(CONFIG)
         
-        # 关闭设置窗口
+        # 隐藏设置窗口（不关闭，否则整个程序会退出）
         if self.settings_window:
-            self.settings_window.destroy()
+            self.settings_window.hide()
         
         # 打开全屏网页
-        webview.create_window(CONFIG['title'], url, fullscreen=True)
+        self.browse_window = webview.create_window(CONFIG['title'], url, fullscreen=True)
         
         return {'ok': True}
 
