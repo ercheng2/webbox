@@ -188,9 +188,9 @@ def main():
         fullscreen=True
     )
     
-    # 添加ESC键打开设置
+    # 添加V键打开设置
     def on_key_press(window, key, modifiers):
-        if key == 'ESC':
+        if key.upper() == 'V':
             create_settings_window(window)
     
     webview.start(on_key_press=on_key_press, debug=False)
