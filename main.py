@@ -36,38 +36,72 @@ class Api:
         self.config['title'] = title
         save_config(self.config)
         return {'status': 'ok', 'url': url, 'title': title}
-    
-    def open_url(self, url):
-        self.config['url'] = url
-        save_config(self.config)
-        return {'status': 'ok'}
 
-def create_settings_window(main_window):
-    """创建设置窗口"""
-    api = Api()
-    config = api.get_config()
-    
-    html = f'''
+def create_main_html(config):
+    return f'''
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>设置</title>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>WebBox</title>
         <style>
-            body {{
-                font-family: Microsoft YaHei, Arial, sans-serif;
-                padding: 20px;
-                background: #f5f5f5;
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            html, body {{ 
+                width: 100%; 
+                height: 100%; 
+                overflow: hidden;
+                background: #1a1a2e;
             }}
-            .container {{
-                max-width: 400px;
-                margin: 0 auto;
+            .settings-btn {{
+                position: fixed;
+                top: 15px;
+                right: 15px;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: rgba(255,255,255,0.9);
+                border: none;
+                cursor: pointer;
+                z-index: 99999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                transition: transform 0.2s;
+            }}
+            .settings-btn:hover {{
+                transform: scale(1.1);
+            }}
+            .settings-btn svg {{
+                width: 20px;
+                height: 20px;
+                fill: #333;
+            }}
+            .modal {{
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 100000;
+                align-items: center;
+                justify-content: center;
+            }}
+            .modal.show {{
+                display: flex;
+            }}
+            .modal-content {{
                 background: white;
                 padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                border-radius: 12px;
+                width: 400px;
+                max-width: 90%;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             }}
-            h2 {{
+            .modal-content h2 {{
                 margin: 0 0 20px 0;
                 color: #333;
                 text-align: center;
@@ -75,20 +109,19 @@ def create_settings_window(main_window):
             .form-group {{
                 margin-bottom: 15px;
             }}
-            label {{
+            .form-group label {{
                 display: block;
                 margin-bottom: 5px;
                 color: #666;
             }}
-            input {{
+            .form-group input {{
                 width: 100%;
                 padding: 10px;
                 border: 1px solid #ddd;
-                border-radius: 4px;
-                box-sizing: border-box;
+                border-radius: 6px;
                 font-size: 14px;
             }}
-            input:focus {{
+            .form-group input:focus {{
                 border-color: #4a9eff;
                 outline: none;
             }}
@@ -97,11 +130,11 @@ def create_settings_window(main_window):
                 display: flex;
                 gap: 10px;
             }}
-            button {{
+            .buttons button {{
                 flex: 1;
                 padding: 10px 20px;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 cursor: pointer;
                 font-size: 14px;
             }}
@@ -127,73 +160,78 @@ def create_settings_window(main_window):
                 font-size: 12px;
                 color: #666;
             }}
+            iframe {{
+                width: 100%;
+                height: 100%;
+                border: none;
+            }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <h2>WebBox 设置</h2>
-            <div class="form-group">
-                <label>网页地址 (URL)</label>
-                <input type="text" id="url" value="{config['url']}" placeholder="https://example.com">
-            </div>
-            <div class="form-group">
-                <label>窗口标题</label>
-                <input type="text" id="title" value="{config['title']}" placeholder="WebBox">
-            </div>
-            <div class="buttons">
-                <button class="btn-save" onclick="saveSettings()">保存并刷新</button>
-                <button class="btn-cancel" onclick="closeWindow()">取消</button>
-            </div>
-            <div class="tip">
-                提示：保存后网页将自动刷新到新地址
+        <button class="settings-btn" onclick="openSettings()" title="设置">
+            <svg viewBox="0 0 24 24">
+                <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+            </svg>
+        </button>
+        
+        <iframe id="webframe" src="{config['url']}"></iframe>
+        
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <h2>WebBox 设置</h2>
+                <div class="form-group">
+                    <label>网页地址 (URL)</label>
+                    <input type="text" id="urlInput" value="{config['url']}" placeholder="https://example.com">
+                </div>
+                <div class="form-group">
+                    <label>窗口标题</label>
+                    <input type="text" id="titleInput" value="{config['title']}" placeholder="WebBox">
+                </div>
+                <div class="buttons">
+                    <button class="btn-save" onclick="saveSettings()">保存并刷新</button>
+                    <button class="btn-cancel" onclick="closeSettings()">取消</button>
+                </div>
+                <div class="tip">
+                    提示：保存后网页将自动刷新到新地址
+                </div>
             </div>
         </div>
+        
         <script>
-            function saveSettings() {{
-                var url = document.getElementById('url').value;
-                var title = document.getElementById('title').value;
-                pywebview.api.save_config(url, title).then(function(response) {{
-                    pywebview.api.open_url(url).then(function() {{
-                        window.close();
-                    }});
-                }});
+            function openSettings() {{
+                document.getElementById('settingsModal').classList.add('show');
             }}
-            function closeWindow() {{
-                window.close();
+            function closeSettings() {{
+                document.getElementById('settingsModal').classList.remove('show');
+            }}
+            function saveSettings() {{
+                var url = document.getElementById('urlInput').value;
+                var title = document.getElementById('titleInput').value;
+                pywebview.api.save_config(url, title).then(function(response) {{
+                    document.getElementById('webframe').src = url;
+                    closeSettings();
+                }});
             }}
         </script>
     </body>
     </html>
     '''
-    
-    settings_window = webview.create_window(
-        '设置',
-        html=html,
-        js_api=api,
-        width=450,
-        height=350,
-        resizable=False
-    )
-    return settings_window
 
 def main():
     config = load_config()
     api = Api()
     
-    # 创建主窗口
-    main_window = webview.create_window(
+    # 创建主窗口，使用本地HTML
+    html = create_main_html(config)
+    
+    window = webview.create_window(
         title=config.get('title', 'WebBox'),
-        url=config.get('url', 'https://www.baidu.com'),
+        html=html,
         js_api=api,
         fullscreen=True
     )
     
-    # 添加V键打开设置
-    def on_key_press(window, key, modifiers):
-        if key.upper() == 'V':
-            create_settings_window(window)
-    
-    webview.start(on_key_press=on_key_press, debug=False)
+    webview.start()
 
 if __name__ == '__main__':
     main()
