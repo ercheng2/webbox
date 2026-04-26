@@ -22,6 +22,13 @@ def log(msg):
 log("=== WebBox 启动 ===")
 
 try:
+    # 在导入Qt之前设置环境变量，禁用GPU加速
+    os.environ['QT_OPENGL'] = 'angle'
+    os.environ['QT_QUICK_BACKEND'] = 'software'
+    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu --disable-gpu-compositing --software-rendering'
+    
+    log("设置OpenGL环境变量...")
+    
     log("导入 PyQt5...")
     from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
     from PyQt5.QtCore import Qt
@@ -46,15 +53,22 @@ class WebBoxWindow(QMainWindow):
         log("初始化窗口...")
         
         try:
-            self.setWindowTitle("WebBox v1.8")
+            self.setWindowTitle("WebBox v1.9")
             self.resize(1280, 720)
+            
+            # 先创建一个普通widget测试
+            log("创建中央widget...")
+            central = QWidget()
+            self.setCentralWidget(central)
+            layout = QVBoxLayout(central)
             
             # 创建WebEngineView
             log("创建WebEngineView...")
-            self.web_view = QWebEngineView(self)
-            self.setCentralWidget(self.web_view)
+            self.web_view = QWebEngineView()
+            layout.addWidget(self.web_view)
             
             # 配置设置
+            log("配置settings...")
             settings = self.web_view.settings()
             settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
             
@@ -86,6 +100,9 @@ def main():
         # 启用高DPI
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        
+        # 使用软件渲染
+        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
         
         log("创建 QApplication...")
         app = QApplication(sys.argv)
