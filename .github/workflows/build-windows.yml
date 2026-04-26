@@ -25,7 +25,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt5==5.15.10 PyQtWebEngine==5.15.6 pyinstaller
     
-    - name: Build with PyInstaller
+    - name: Build with PyInstaller (onedir mode)
       shell: pwsh
       run: |
         @"
@@ -34,14 +34,20 @@ jobs:
         
         block_cipher = None
         
-        # 投��`PyQt5所有市场于方
-        datas, binaries, hiddenimports = collect_all("PyQt5")
+        # 加衏PyQt5分析PeQtWebEngine市场于它
+        pyqt5_datas, pyqt5_binaries, pyqt5_hiddenimports = collect_all("PyQt5")
+        webengine_datas, webengine_binaries, webengine_hiddenimports = collect_all("PyQtWebEngine")
         
-        a = Analysis(["main.py"],
+        # 安全
+        all_datas = pyqt5_datas + webengine_datas
+        all_binaries = pyqt5_binaries + webengine_binaries
+        all_hiddenimports = pyqt5_hiddenimports + webengine_hiddenimports
+        
+        a = Analysis("main.py",
                      pathex=[],
-                    binaries=binaries,
-                    datas=datas + [("webbox_config.json", "."), ("Kunzhancheng.ico", ".")],
-                    hiddenimports=hiddenimports,
+                    binaries=all_binaries,
+                    datas=all_datas + [("webbox_config.json", "."), ("Kunzhancheng.ico", ".")],
+                    hiddenimports=all_hiddenimports,
                     hookpath=[],
                     runtime_hooks=[],
                     excludes=[],
@@ -49,21 +55,27 @@ jobs:
         
         pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
         
-        exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
+        exe = EXE(pyz, a.scripts, [],
                   name="WebBox",
                   debug=False,
                   strip=False,
                   upx=True,
                   console=False,
                   icon="Kunzhancheng.ico")
+        
+        coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, [],
+                       name="WebBox")
         "@ | Out-File -FilePath "webbox.spec" -Encoding utf8
         
         pyinstaller --clean webbox.spec
     
+    - name: Zip the folder
+      run: Compress-Archive -Path dist/WebBox -DestinationPath dist/WebBox.zip
+    
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v1.3
-        files: dist/WebBox.exe
+        tag_name: v1.4
+        files: dist/WebBox.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
