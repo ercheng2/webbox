@@ -25,77 +25,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install PyQt5 PyQtWebEngine pyinstaller
     
-    - name: Build EXE with WebEngine
+    - name: Build EXE
       run: |
-        # 使用PyInstaller的collect_all来收集所有WebEngine文件
-        python -c "
-        from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
-        import os
-        
-        # 收集PyQt5 WebEngine相关文件
-        datas = []
-        datas += collect_data_files('PyQt5')
-        datas += collect_data_files('PyQt5.QtWebEngineWidgets')
-        datas += collect_data_files('PyQt5.QtWebEngineCore')
-        
-        # 写入spec文件
-        spec = '''# -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
-
-block_cipher = None
-
-datas = [('webbox_config.json', '.'), ('Kunzhancheng.ico', '.')]
-datas += collect_data_files('PyQt5')
-datas += collect_data_files('PyQt5.QtWebEngineWidgets')
-datas += collect_data_files('PyQt5.QtWebEngineCore')
-
-hiddenimports = ['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 
-                 'PyQt5.QtWebEngineWidgets', 'PyQt5.QtWebEngineCore',
-                 'PyQt5.sip']
-
-a = Analysis(['main.py'],
-             pathex=[],
-             binaries=[],
-             datas=datas,
-             hiddenimports=hiddenimports,
-             hookspath=[],
-             hooksconfig={},
-             runtime_hooks=[],
-             excludes=['tkinter', 'matplotlib', 'numpy', 'pandas', 'PIL'],
-             win_no_prefer_redirects=False,
-             win_private_assemblies=False,
-             cipher=block_cipher,
-             noarchive=False)
-
-pyz = PYZ(a.pure, a.zipped_data,
-             cipher=block_cipher)
-
-exe = EXE(pyz,
-          a.scripts,
-          a.binaries,
-          a.zipfiles,
-          a.datas,
-          [],
-          name='WebBox',
-          debug=False,
-          bootloader_ignore_signals=False,
-          strip=False,
-          upx=True,
-          upx_exclude=[],
-          runtime_tmpdir=None,
-          console=False,
-          disable_windowed_traceback=False,
-          argv_emulation=False,
-          target_arch=None,
-          codesign_identity=None,
-          entitlements_file=None,
-          icon='Kunzhancheng.ico')
-'''
-        with open('webbox.spec', 'w') as f:
-            f.write(spec)
-        "
-        
-        pyinstaller --clean webbox.spec
+        pyinstaller --onefile --windowed --name "WebBox" --icon "Kunzhancheng.ico" --add-data "webbox_config.json;." --add-data "Kunzhancheng.ico;." --hidden-import "PyQt5.QtWebEngineWidgets" --hidden-import "PyQt5.QtWebEngineCore" --collect-all "PyQt5" main.py
     
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
