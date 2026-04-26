@@ -96,7 +96,7 @@ class WebBoxWindow(QMainWindow):
         return default_config
     
     def _init_ui(self):
-        """初始化UI""
+        """初始化UI"""
         # 设置窗口图标
         icon_path = Path(__file__).parent / 'Kunzhancheng.ico'
         if icon_path.exists():
@@ -276,3 +276,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
