@@ -3,7 +3,7 @@ import json
 import sys
 import threading
 from pathlib import Path
-from pynput import keyboard
+from infi.systray import SysTrayIcon
 
 def get_config_path():
     if getattr(sys, 'frozen', False):
@@ -38,9 +38,6 @@ class Api:
         self.config['title'] = title
         save_config(self.config)
         return {'status': 'ok', 'url': url, 'title': title}
-    
-    def reload_url(self, url):
-        return {'status': 'ok'}
 
 def create_settings_html(config):
     return f'''
@@ -115,14 +112,6 @@ def create_settings_html(config):
             .btn-cancel:hover {{
                 background: #d0d0d0;
             }}
-            .tip {{
-                margin-top: 15px;
-                padding: 10px;
-                background: #fffbe6;
-                border-radius: 4px;
-                font-size: 12px;
-                color: #666;
-            }}
         </style>
     </head>
     <body>
@@ -137,11 +126,8 @@ def create_settings_html(config):
                 <input type="text" id="titleInput" value="{config['title']}" placeholder="WebBox">
             </div>
             <div class="buttons">
-                <button class="btn-save" onclick="saveSettings()">保存</button>
+                <button class="btn-save" onclick="saveSettings()">保存并刷新</button>
                 <button class="btn-cancel" onclick="window.close()">取消</button>
-            </div>
-            <div class="tip">
-                提示：按 V 键可随时打开此设置窗口
             </div>
         </div>
         <script>
@@ -159,47 +145,63 @@ def create_settings_html(config):
 
 # 全局变量
 main_window = None
-settings_window = None
 api = None
+systray = None
 
-def on_key_press(key):
-    """监听V键"""
-    global main_window, settings_window, api
-    try:
-        if key.char and key.char.lower() == 'v':
-            # 打开设置窗口
-            config = load_config()
-            html = create_settings_html(config)
-            settings_window = webview.create_window(
-                '设置',
-                html=html,
-                js_api=api,
-                width=450,
-                height=350,
-                resizable=False
-            )
-    except AttributeError:
-        pass
+def open_settings(systray_icon):
+    """打开设置窗口"""
+    global main_window, api
+    config = load_config()
+    html = create_settings_html(config)
+    settings_window = webview.create_window(
+        '设置',
+        html=html,
+        js_api=api,
+        width=450,
+        height=300,
+        resizable=False
+    )
+
+def reload_page(systray_icon):
+    """刷新页面"""
+    global main_window, api
+    config = load_config()
+    if main_window:
+        main_window.load_url(config['url'])
+
+def quit_app(systray_icon):
+    """退出程序"""
+    global main_window
+    if main_window:
+        main_window.destroy()
+    webview.shutdown()
 
 def main():
-    global main_window, api
+    global main_window, api, systray
     
     config = load_config()
     api = Api()
     
-    # 创建主窗口 - 直接加载URL
+    # 创建主窗口
     main_window = webview.create_window(
         title=config.get('title', 'WebBox'),
         url=config.get('url', 'https://www.baidu.com'),
         fullscreen=True
     )
     
-    # 启动全局热键监听（在后台线程）
-    listener = keyboard.Listener(on_press=on_key_press)
-    listener.daemon = True
-    listener.start()
+    # 创建系统托盘
+    menu_options = (
+        ("设置", None, open_settings),
+        ("刷新页面", None, reload_page),
+        ("退出", None, quit_app),
+    )
+    systray = SysTrayIcon("Kunzhancheng.ico", "WebBox", menu_options)
+    systray.start()
     
     webview.start()
+    
+    # 退出时停止托盘
+    systray.shutdown()
 
 if __name__ == '__main__':
     main()
