@@ -16,7 +16,7 @@ jobs:
     - name: Install
       run: pip install pywebview pyinstaller
     - name: Build
-      run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico main.py
+      run: pyinstaller --onefile --noconsole --name WebBox main.py
     - uses: softprops/action-gh-release@v1
       with:
         tag_name: v3.0
