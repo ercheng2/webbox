@@ -9,14 +9,12 @@ import os
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon
-# QWebEngineProfile在PyQt5 5.15+中可能需要特殊处理
-try:
-    from PyQt5.QtWebEngineCore import QWebEngineProfile
-except ImportError:
-    QWebEngineProfile = None
+
+# WebEngine导入 - 必须先初始化
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+from PyQt5.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
 
 class WebBoxPage(QWebEnginePage):
@@ -55,7 +53,7 @@ class WebBoxWindow(QMainWindow):
         if config_path:
             self.config_file = Path(config_path)
         else:
-            self.config_file = Path(__file__).parent / 'webbox_config.json'
+            self.config_file = self._get_config_path()
         
         # 初始化UI
         self._init_ui()
@@ -66,15 +64,25 @@ class WebBoxWindow(QMainWindow):
         # 加载初始网页
         self._load_current_website()
     
+    def _get_config_path(self):
+        """获取配置文件路径，兼容打包后的路径"""
+        if getattr(sys, 'frozen', False):
+            # 打包后，exe所在目录
+            base_path = Path(sys.executable).parent
+        else:
+            # 开发环境
+            base_path = Path(__file__).parent
+        return base_path / 'webbox_config.json'
+    
     def _load_config(self, config_path: str = None) -> dict:
         """加载配置文件"""
         if config_path:
             config_file = Path(config_path)
         else:
-            config_file = Path(__file__).parent / 'webbox_config.json'
+            config_file = self._get_config_path()
         
         default_config = {
-            'websites': [{'name': '默认', 'url': 'https://example.com'}],
+            'websites': [{'name': '默认', 'url': 'https://www.baidu.com'}],
             'default_index': 0,
             'hotkeys': {
                 'quit': ['Escape', 'Ctrl+Q'],
@@ -99,12 +107,22 @@ class WebBoxWindow(QMainWindow):
         
         return default_config
     
+    def _get_resource_path(self, relative_path):
+        """获取资源文件路径，兼容打包后的路径"""
+        if getattr(sys, 'frozen', False):
+            # 打包后，使用_MEIPASS临时目录
+            base_path = Path(sys._MEIPASS)
+        else:
+            # 开发环境
+            base_path = Path(__file__).parent
+        return str(base_path / relative_path)
+    
     def _init_ui(self):
         """初始化UI"""
         # 设置窗口图标
-        icon_path = Path(__file__).parent / 'Kunzhancheng.ico'
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        icon_path = self._get_resource_path('Kunzhancheng.ico')
+        if Path(icon_path).exists():
+            self.setWindowIcon(QIcon(icon_path))
         
         # 设置窗口属性
         self.setWindowFlags(
@@ -135,11 +153,10 @@ class WebBoxWindow(QMainWindow):
         
         # 支持触摸和滚动
         self.web_view.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        self.web_view.page().setScrollBarPolicy(Qt.Horizontal, Qt.ScrollBarAlwaysOff)
-        self.web_view.page().setScrollBarPolicy(Qt.VentanaVertical, Qt.ScrollBarAutoHide)
         
         # 设置UserAgent
-        self.web_view.page().profile().setHttpUserAgent(
+        profile = self.web_view.page().profile()
+        profile.setHttpUserAgent(
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
             '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
@@ -254,7 +271,7 @@ def main():
     # 创建应用
     app = QApplication(sys.argv)
     app.setApplicationName("WebBox")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.3.0")
     app.setQuitOnLastWindowClosed(True)
     
     # 设置应用样式
@@ -280,4 +297,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
