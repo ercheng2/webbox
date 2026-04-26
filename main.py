@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 def get_config_path():
-    # 使用 AppData 目录，确保可写
     if sys.platform == 'win32':
         config_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
     else:
@@ -22,8 +21,8 @@ def load_config():
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
                     default.update(loaded)
-        except Exception as e:
-            print(f"加载配置失败: {e}")
+        except:
+            pass
     return default
 
 def save_to_file(config):
@@ -31,160 +30,156 @@ def save_to_file(config):
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        print(f"配置已保存到: {config_file}")
         return True
-    except Exception as e:
-        print(f"保存配置失败: {e}")
+    except:
         return False
 
 class Api:
-    def __init__(self):
+    def __init__(self, main_window=None):
         self.config = load_config()
-        self.window = None
-    
-    def set_window(self, window):
-        self.window = window
+        self.main_window = main_window
     
     def save_config(self, url, title):
+        url = url.strip()
+        if not url:
+            url = 'https://www.baidu.com'
+        if not url.startswith('http://') and not url.startswith('https://'):
+            url = 'https://' + url
+        
         self.config['url'] = url
-        self.config['title'] = title
-        result = save_to_file(self.config)
-        # 更新窗口标题
-        if self.window:
-            self.window.title = title
-        return {'status': 'ok', 'saved': result}
-    
-    def get_config(self):
-        return self.config
+        self.config['title'] = title.strip() or 'WebBox'
+        save_to_file(self.config)
+        
+        # 重新加载主窗口
+        if self.main_window:
+            self.main_window.title = self.config['title']
+            self.main_window.load_url(url)
+        
+        return {'status': 'ok', 'url': url}
 
-def create_page(config):
-    return f'''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>WebBox</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ width: 100%; height: 100%; overflow: hidden; font-family: Arial, sans-serif; }}
-        .bar {{ 
-            position: fixed; top: 0; left: 0; right: 0; height: 40px; 
-            background: linear-gradient(180deg, #3a3a3a, #2d2d2d); 
-            display: flex; align-items: center; 
-            padding: 0 12px; z-index: 99999; gap: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }}
-        .bar button {{ 
-            background: #555; border: 1px solid #666; color: #fff; 
-            padding: 8px 16px; border-radius: 4px; cursor: pointer; 
-            font-size: 13px; transition: all 0.2s;
-        }}
-        .bar button:hover {{ background: #666; border-color: #888; }}
-        .bar .title {{ 
-            color: #aaa; font-size: 12px; margin-left: auto; 
-            max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }}
-        .frame {{ position: fixed; top: 40px; left: 0; right: 0; bottom: 0; }}
-        iframe {{ width: 100%; height: 100%; border: none; }}
-        .dlg {{ 
-            display: none; position: fixed; inset: 0; 
-            background: rgba(0,0,0,0.6); z-index: 999999; 
-            align-items: center; justify-content: center;
-        }}
-        .dlg.show {{ display: flex; }}
-        .dlg-box {{ 
-            background: #fff; padding: 28px; border-radius: 12px; 
-            width: 420px; max-width: 90%; 
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-        }}
-        .dlg-box h3 {{ margin: 0 0 20px; color: #333; text-align: center; font-size: 18px; }}
-        .dlg-box label {{ display: block; margin-bottom: 6px; color: #555; font-size: 14px; }}
-        .dlg-box input {{ 
-            width: 100%; padding: 10px 12px; margin-bottom: 16px; 
-            border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
-            transition: border-color 0.2s;
-        }}
-        .dlg-box input:focus {{ border-color: #4a9eff; outline: none; }}
-        .dlg-box .btns {{ display: flex; gap: 12px; margin-top: 24px; }}
-        .dlg-box button {{ 
-            flex: 1; padding: 12px; border: none; border-radius: 6px; 
-            cursor: pointer; font-size: 14px; font-weight: 500;
-        }}
-        .dlg-box .ok {{ background: #4a9eff; color: #fff; }}
-        .dlg-box .ok:hover {{ background: #3a8eef; }}
-        .dlg-box .no {{ background: #f0f0f0; color: #666; }}
-        .dlg-box .no:hover {{ background: #e0e0e0; }}
-        .hint {{ font-size: 12px; color: #888; margin-top: 12px; text-align: center; }}
-    </style>
-</head>
-<body>
-    <div class="bar">
-        <button onclick="openDlg()">⚙️ 设置</button>
-        <button onclick="reload()">🔄 刷新</button>
-        <span class="title" id="titleDisplay">{config['title']}</span>
-    </div>
-    <div class="frame">
-        <iframe id="frm" src="{config['url']}"></iframe>
-    </div>
-    <div class="dlg" id="dlg">
-        <div class="dlg-box">
-            <h3>WebBox 设置</h3>
+def show_settings(api):
+    """显示设置窗口"""
+    config = api.config
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>设置</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ 
+                font-family: "Microsoft YaHei", Arial, sans-serif; 
+                padding: 30px; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .box {{ 
+                background: #fff; 
+                padding: 40px; 
+                border-radius: 16px; 
+                width: 100%;
+                max-width: 420px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            }}
+            h3 {{ margin: 0 0 30px; color: #333; text-align: center; font-size: 22px; }}
+            label {{ display: block; margin-bottom: 8px; color: #555; font-size: 14px; font-weight: 500; }}
+            input {{ 
+                width: 100%; padding: 14px 16px; margin-bottom: 24px; 
+                border: 2px solid #e0e0e0; border-radius: 8px; font-size: 15px;
+                transition: border-color 0.2s;
+            }}
+            input:focus {{ border-color: #667eea; outline: none; }}
+            .btns {{ display: flex; gap: 14px; margin-top: 10px; }}
+            button {{ 
+                flex: 1; padding: 14px; border: none; border-radius: 8px; 
+                cursor: pointer; font-size: 15px; font-weight: 600;
+                transition: transform 0.1s;
+            }}
+            button:active {{ transform: scale(0.98); }}
+            .ok {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; }}
+            .no {{ background: #f0f0f0; color: #666; }}
+            .hint {{ font-size: 13px; color: #888; margin-top: 20px; text-align: center; }}
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h3>🌐 WebBox 设置</h3>
             <label>网页地址</label>
             <input type="text" id="urlInput" value="{config['url']}" placeholder="https://example.com">
             <label>窗口标题</label>
             <input type="text" id="titleInput" value="{config['title']}" placeholder="WebBox">
             <div class="btns">
-                <button class="ok" onclick="save()">保存</button>
-                <button class="no" onclick="closeDlg()">取消</button>
+                <button class="ok" onclick="save()">✓ 保存并刷新</button>
+                <button class="no" onclick="window.close()">取消</button>
             </div>
-            <div class="hint">保存后自动刷新页面，配置会记住</div>
+            <div class="hint">提示：网址可省略 https:// 前缀</div>
         </div>
-    </div>
-    <script>
-        function openDlg() {{ 
-            document.getElementById('dlg').classList.add('show');
+        <script>
             document.getElementById('urlInput').focus();
-        }}
-        function closeDlg() {{ 
-            document.getElementById('dlg').classList.remove('show');
-        }}
-        function save() {{
-            var url = document.getElementById('urlInput').value.trim();
-            var title = document.getElementById('titleInput').value.trim();
-            if (!url) {{
-                alert('请输入网址');
-                return;
+            document.getElementById('urlInput').select();
+            
+            function save() {{
+                var url = document.getElementById('urlInput').value.trim();
+                var title = document.getElementById('titleInput').value.trim();
+                if (!url) {{
+                    alert('请输入网址');
+                    return;
+                }}
+                pywebview.api.save_config(url, title).then(function() {{
+                    window.close();
+                }});
             }}
-            pywebview.api.save_config(url, title).then(function(result) {{
-                document.getElementById('frm').src = url;
-                document.getElementById('titleDisplay').textContent = title || 'WebBox';
-                closeDlg();
+            
+            document.addEventListener('keydown', function(e) {{
+                if (e.key === 'Enter') save();
+                if (e.key === 'Escape') window.close();
             }});
-        }}
-        function reload() {{ 
-            var f = document.getElementById('frm');
-            f.src = f.src;
-        }}
-        // ESC 关闭对话框
-        document.addEventListener('keydown', function(e) {{
-            if (e.key === 'Escape') closeDlg();
-        }});
-    </script>
-</body>
-</html>
-'''
+        </script>
+    </body>
+    </html>
+    '''
+    
+    settings = webview.create_window(
+        'WebBox 设置',
+        html=html,
+        js_api=api,
+        width=480,
+        height=420,
+        resizable=False,
+        minimizable=False
+    )
 
 def main():
     config = load_config()
-    api = Api()
     
-    window = webview.create_window(
+    # 创建主窗口 - 直接加载网页（不用iframe，解决跨域问题）
+    main_window = webview.create_window(
         title=config.get('title', 'WebBox'),
-        html=create_page(config),
-        js_api=api,
+        url=config.get('url', 'https://www.baidu.com'),
         fullscreen=True
     )
-    api.set_window(window)
+    
+    api = Api(main_window)
+    
+    # 启动时先显示设置窗口
+    def on_loaded():
+        show_settings(api)
+    
+    # 延迟显示设置窗口
+    import threading
+    def show_settings_delayed():
+        import time
+        time.sleep(0.5)
+        show_settings(api)
+    
+    t = threading.Thread(target=show_settings_delayed, daemon=True)
+    t.start()
+    
     webview.start()
 
 if __name__ == '__main__':
