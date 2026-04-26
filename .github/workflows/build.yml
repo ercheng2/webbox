@@ -14,7 +14,7 @@ jobs:
       with:
         python-version: "3.10"
     - name: Install
-      run: pip install pywebview pyinstaller
+      run: pip install pywebview pynput pyinstaller
     - name: Build
       run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico main.py
     - name: Get version
