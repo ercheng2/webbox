@@ -31,42 +31,20 @@ def save_config(data):
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ===== API =====
-class SettingsApi:
-    def __init__(self):
-        self.settings_window = None
-    
-    def set_window(self, win):
-        self.settings_window = win
-    
-    def get_config(self):
-        return load_config()
-    
-    def start_browse(self, url, title):
-        """保存配置并打开网页"""
-        url = url.strip()
-        if not url:
-            return {'error': '请输入网址'}
-        
-        # 自动添加https
-        if not url.startswith('http://') and not url.startswith('https://'):
-            url = 'https://' + url
-        
-        # 保存配置
-        config = {
-            'url': url,
-            'title': title.strip() or 'WebBox'
-        }
-        save_config(config)
-        
-        # 隐藏设置窗口
-        if self.settings_window:
-            self.settings_window.hide()
-        
-        # 打开全屏网页
-        webview.create_window(config['title'], url, fullscreen=True)
-        
-        return {'ok': True}
+# ===== 悬浮按钮JS =====
+FLOATING_BTN_JS = '''
+(function() {
+    if (document.getElementById('webbox_settings_btn')) return;
+    var btn = document.createElement('div');
+    btn.id = 'webbox_settings_btn';
+    btn.innerHTML = '⚙️';
+    btn.style.cssText = 'position:fixed;right:20px;bottom:20px;width:50px;height:50px;border-radius:50%;background:rgba(102,126,234,0.9);color:white;font-size:24px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483647;box-shadow:0 4px 15px rgba(0,0,0,0.3);transition:transform 0.2s;';
+    btn.onmouseenter = function() { this.style.transform = 'scale(1.1)'; };
+    btn.onmouseleave = function() { this.style.transform = 'scale(1)'; };
+    btn.onclick = function() { pywebview.api.open_settings(); };
+    document.body.appendChild(btn);
+})();
+'''
 
 # ===== 设置页面HTML =====
 SETTINGS_HTML = '''<!DOCTYPE html>
@@ -149,7 +127,7 @@ input:focus {
 </head>
 <body>
 <div class="container">
-    <h2>🌐 WebBox 网页盒子</h2>
+    <h2>🌐 WebBox 设置</h2>
     <div class="field">
         <label>网页地址</label>
         <input type="text" id="urlInput" placeholder="请输入网址，如 www.baidu.com">
@@ -159,18 +137,14 @@ input:focus {
         <input type="text" id="titleInput" placeholder="WebBox">
     </div>
     <div class="hint">
-        💡 提示：<br>
-        • 网址可省略 https:// 前缀<br>
-        • 点击"开始浏览"后会全屏显示网页<br>
-        • 网址会自动保存，下次启动直接打开
+        💡 提示：修改后点击"保存"即可刷新网页
     </div>
-    <button class="btn" onclick="startBrowse()">开始浏览</button>
+    <button class="btn" onclick="saveAndReload()">保存</button>
 </div>
 <script>
 var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 
-// 加载已保存的配置
 pywebview.api.get_config().then(function(config) {
     if (config.url) urlInput.value = config.url;
     if (config.title) titleInput.value = config.title;
@@ -178,7 +152,7 @@ pywebview.api.get_config().then(function(config) {
     urlInput.select();
 });
 
-function startBrowse() {
+function saveAndReload() {
     var url = urlInput.value.trim();
     var title = titleInput.value.trim();
     
@@ -188,29 +162,91 @@ function startBrowse() {
         return;
     }
     
-    pywebview.api.start_browse(url, title);
+    pywebview.api.save_and_reload(url, title);
 }
 
-// 回车键提交
 urlInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') startBrowse();
+    if (e.key === 'Enter') saveAndReload();
 });
 titleInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') startBrowse();
+    if (e.key === 'Enter') saveAndReload();
 });
 </script>
 </body>
 </html>'''
 
+# ===== 浏览窗口API =====
+class BrowseApi:
+    def __init__(self):
+        self.browse_window = None
+    
+    def set_window(self, win):
+        self.browse_window = win
+    
+    def open_settings(self):
+        api = SettingsApi()
+        api.browse_window = self.browse_window
+        settings_win = webview.create_window(
+            '修改网址',
+            html=SETTINGS_HTML,
+            js_api=api,
+            width=540,
+            height=480,
+            resizable=False
+        )
+        api.settings_window = settings_win
+
+# ===== 设置窗口API =====
+class SettingsApi:
+    def __init__(self):
+        self.settings_window = None
+        self.browse_window = None
+    
+    def get_config(self):
+        return load_config()
+    
+    def save_and_reload(self, url, title):
+        url = url.strip()
+        if not url:
+            return {'error': '请输入网址'}
+        
+        if not url.startswith('http://') and not url.startswith('https://'):
+            url = 'https://' + url
+        
+        config = {'url': url, 'title': title.strip() or 'WebBox'}
+        save_config(config)
+        
+        # 关闭设置窗口
+        if self.settings_window:
+            self.settings_window.destroy()
+        
+        # 刷新浏览窗口
+        if self.browse_window:
+            self.browse_window.load_url(url)
+        
+        return {'ok': True}
+
 # ===== 主程序 =====
 def main():
     config = load_config()
     
-    # 有配置，直接打开全屏网页
     if config.get('url'):
-        webview.create_window(config.get('title', 'WebBox'), config['url'], fullscreen=True)
+        api = BrowseApi()
+        browse_win = webview.create_window(
+            config.get('title', 'WebBox'),
+            config['url'],
+            fullscreen=True,
+            js_api=api
+        )
+        api.set_window(browse_win)
+        # 页面加载完成后注入悬浮按钮
+        def on_loaded():
+            try:
+                browse_win.evaluate_js(FLOATING_BTN_JS)
+            except:
+                pass
+        browse_win.events.loaded += on_loaded
     else:
-        # 没配置，显示设置窗口
         api = SettingsApi()
         settings_win = webview.create_window(
             'WebBox 设置',
@@ -220,7 +256,7 @@ def main():
             height=480,
             resizable=False
         )
-        api.set_window(settings_win)
+        api.settings_window = settings_win
     
     webview.start()
 
