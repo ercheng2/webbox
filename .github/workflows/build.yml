@@ -17,9 +17,12 @@ jobs:
       run: pip install pywebview pyinstaller
     - name: Build
       run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico main.py
+    - name: Get version
+      id: version
+      run: echo "VERSION=v$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
     - uses: softprops/action-gh-release@v1
       with:
-        tag_name: v3.1
+        tag_name: ${{ steps.version.outputs.VERSION }}
         files: dist/WebBox.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
