@@ -9,10 +9,14 @@ import os
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEnginePage
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+# QWebEngineProfile在PyQt5 5.15+中可能需要特殊处理
+try:
+    from PyQt5.QtWebEngineCore import QWebEngineProfile
+except ImportError:
+    QWebEngineProfile = None
 
 
 class WebBoxPage(QWebEnginePage):
