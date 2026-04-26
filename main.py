@@ -294,15 +294,13 @@ def create_toolbar():
 </html>'''
     
     webview.create_window(
-        '',
+        '工具栏',
         html=toolbar_html,
         js_api=MainApi(),
         width=220,
-        height=40,
-        frameless=True,
-        always_on_top=True,
-        x=10,
-        y=10
+        height=50,
+        x=0,
+        y=0
     )
 
 # ============ 主程序 ============
