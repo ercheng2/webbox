@@ -217,8 +217,7 @@ def main():
         js_api=api,
         width=540,
         height=480,
-        resizable=False,
-        minimizable=False
+        resizable=False
     )
     api.set_window(settings_win)
     
