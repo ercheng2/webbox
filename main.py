@@ -1,9 +1,7 @@
 import webview
 import json
 import sys
-import threading
 from pathlib import Path
-from infi.systray import SysTrayIcon
 
 def get_config_path():
     if getattr(sys, 'frozen', False):
@@ -27,191 +25,108 @@ def save_config(config):
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 class Api:
-    def __init__(self, on_save=None):
+    def __init__(self):
         self.config = load_config()
-        self.on_save = on_save
-    
-    def get_config(self):
-        return self.config
     
     def save_config(self, url, title):
         self.config['url'] = url
         self.config['title'] = title
         save_config(self.config)
-        if self.on_save:
-            self.on_save(url, title)
-        return {'status': 'ok', 'url': url, 'title': title}
+        return {'status': 'ok'}
 
-def create_settings_html(config):
+def create_page(config):
     return f'''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>设置</title>
-        <style>
-            body {{
-                font-family: Microsoft YaHei, Arial, sans-serif;
-                padding: 20px;
-                background: #f5f5f5;
-            }}
-            .container {{
-                max-width: 400px;
-                margin: 0 auto;
-                background: white;
-                padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }}
-            h2 {{
-                margin: 0 0 20px 0;
-                color: #333;
-                text-align: center;
-            }}
-            .form-group {{
-                margin-bottom: 15px;
-            }}
-            label {{
-                display: block;
-                margin-bottom: 5px;
-                color: #666;
-            }}
-            input {{
-                width: 100%;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                box-sizing: border-box;
-                font-size: 14px;
-            }}
-            input:focus {{
-                border-color: #4a9eff;
-                outline: none;
-            }}
-            .buttons {{
-                margin-top: 20px;
-                display: flex;
-                gap: 10px;
-            }}
-            button {{
-                flex: 1;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 14px;
-            }}
-            .btn-save {{
-                background: #4a9eff;
-                color: white;
-            }}
-            .btn-save:hover {{
-                background: #3a8eef;
-            }}
-            .btn-cancel {{
-                background: #e0e0e0;
-                color: #666;
-            }}
-            .btn-cancel:hover {{
-                background: #d0d0d0;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>WebBox 设置</h2>
-            <div class="form-group">
-                <label>网页地址 (URL)</label>
-                <input type="text" id="urlInput" value="{config['url']}" placeholder="https://example.com">
-            </div>
-            <div class="form-group">
-                <label>窗口标题</label>
-                <input type="text" id="titleInput" value="{config['title']}" placeholder="WebBox">
-            </div>
-            <div class="buttons">
-                <button class="btn-save" onclick="saveSettings()">保存并刷新</button>
-                <button class="btn-cancel" onclick="window.close()">取消</button>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WebBox</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ width: 100%; height: 100%; overflow: hidden; }}
+        .bar {{ 
+            position: fixed; top: 0; left: 0; right: 0; height: 36px; 
+            background: #2d2d2d; display: flex; align-items: center; 
+            padding: 0 10px; z-index: 99999; gap: 8px;
+        }}
+        .bar button {{ 
+            background: #444; border: none; color: #fff; 
+            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }}
+        .bar button:hover {{ background: #666; }}
+        .bar span {{ color: #888; font-size: 11px; margin-left: auto; }}
+        .frame {{ position: fixed; top: 36px; left: 0; right: 0; bottom: 0; }}
+        iframe {{ width: 100%; height: 100%; border: none; }}
+        .dlg {{ 
+            display: none; position: fixed; inset: 0; 
+            background: rgba(0,0,0,0.5); z-index: 999999; 
+            align-items: center; justify-content: center;
+        }}
+        .dlg.show {{ display: flex; }}
+        .dlg-box {{ 
+            background: #fff; padding: 24px; border-radius: 8px; 
+            width: 360px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }}
+        .dlg-box h3 {{ margin: 0 0 16px; color: #333; text-align: center; }}
+        .dlg-box label {{ display: block; margin-bottom: 4px; color: #666; font-size: 13px; }}
+        .dlg-box input {{ 
+            width: 100%; padding: 8px; margin-bottom: 12px; 
+            border: 1px solid #ddd; border-radius: 4px; font-size: 14px;
+        }}
+        .dlg-box .btns {{ display: flex; gap: 8px; margin-top: 16px; }}
+        .dlg-box button {{ flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; }}
+        .dlg-box .ok {{ background: #4a9eff; color: #fff; }}
+        .dlg-box .no {{ background: #eee; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class="bar">
+        <button onclick="openDlg()">设置</button>
+        <button onclick="reload()">刷新</button>
+        <span>WebBox</span>
+    </div>
+    <div class="frame">
+        <iframe id="frm" src="{config['url']}"></iframe>
+    </div>
+    <div class="dlg" id="dlg">
+        <div class="dlg-box">
+            <h3>设置</h3>
+            <label>网址</label>
+            <input type="text" id="u" value="{config['url']}">
+            <label>标题</label>
+            <input type="text" id="t" value="{config['title']}">
+            <div class="btns">
+                <button class="ok" onclick="save()">保存</button>
+                <button class="no" onclick="closeDlg()">取消</button>
             </div>
         </div>
-        <script>
-            function saveSettings() {{
-                var url = document.getElementById('urlInput').value;
-                var title = document.getElementById('titleInput').value;
-                pywebview.api.save_config(url, title).then(function(response) {{
-                    window.close();
+    </div>
+    <script>
+        function openDlg() {{ document.getElementById('dlg').classList.add('show'); }}
+        function closeDlg() {{ document.getElementById('dlg').classList.remove('show'); }}
+        function save() {{
+            pywebview.api.save_config(document.getElementById('u').value, document.getElementById('t').value)
+                .then(function() {{ 
+                    document.getElementById('frm').src = document.getElementById('u').value;
+                    closeDlg(); 
                 }});
-            }}
-        </script>
-    </body>
-    </html>
-    '''
-
-# 全局变量
-main_window = None
-api = None
-systray = None
-
-def on_config_saved(url, title):
-    """配置保存后刷新主窗口"""
-    global main_window
-    if main_window:
-        main_window.load_url(url)
-        main_window.title = title
-
-def open_settings(systray_icon):
-    """打开设置窗口"""
-    global main_window, api
-    config = load_config()
-    html = create_settings_html(config)
-    settings_window = webview.create_window(
-        '设置',
-        html=html,
-        js_api=api,
-        width=450,
-        height=300,
-        resizable=False
-    )
-
-def reload_page(systray_icon):
-    """刷新页面"""
-    global main_window
-    config = load_config()
-    if main_window:
-        main_window.load_url(config['url'])
-
-def quit_app(systray_icon):
-    """退出程序"""
-    import os
-    os._exit(0)
+        }}
+        function reload() {{ var f = document.getElementById('frm'); f.src = f.src; }}
+    </script>
+</body>
+</html>
+'''
 
 def main():
-    global main_window, api, systray
-    
     config = load_config()
-    api = Api(on_save=on_config_saved)
-    
-    # 创建主窗口
-    main_window = webview.create_window(
+    api = Api()
+    window = webview.create_window(
         title=config.get('title', 'WebBox'),
-        url=config.get('url', 'https://www.baidu.com'),
+        html=create_page(config),
+        js_api=api,
         fullscreen=True
     )
-    
-    # 创建系统托盘
-    menu_options = (
-        ("设置", None, open_settings),
-        ("刷新页面", None, reload_page),
-        ("退出", None, quit_app),
-    )
-    
-    # 使用默认图标（Windows会显示默认应用图标）
-    systray = SysTrayIcon("Kunzhancheng.ico", "WebBox", menu_options, default_menu_index=0)
-    systray.start()
-    
     webview.start()
-    
-    # 退出时停止托盘
-    systray.shutdown()
 
 if __name__ == '__main__':
     main()
