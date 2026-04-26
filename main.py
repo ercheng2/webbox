@@ -11,6 +11,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
 
@@ -95,7 +96,12 @@ class WebBoxWindow(QMainWindow):
         return default_config
     
     def _init_ui(self):
-        """初始化UI"""
+        """初始化UI""
+        # 设置窗口图标
+        icon_path = Path(__file__).parent / 'Kunzhancheng.ico'
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        
         # 设置窗口属性
         self.setWindowFlags(
             Qt.FramelessWindowHint |  # 无边框
