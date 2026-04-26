@@ -20,7 +20,8 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v3.13
+        tag_name: v3.14-${{ github.run_number }}
+        name: WebBox v3.14 Build ${{ github.run_number }}
         files: dist/WebBox.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
