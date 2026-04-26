@@ -1,0 +1,279 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        include:
+          - python-version: '3.10'
+            platform: win64
+            installer: win_amd64
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install PyQt5 WebEngine dependencies (Chrome)
+        run: |
+          pip install pyqt5-tools
+          # 确保WebEngine组件可用
+          python -c "from PyQt5 import QtWebEngineWidgets; print('WebEngine OK')"
+      
+      - name: Create spec file for PyInstaller
+        run: |
+          $specContent = @"
+          # -*- mode: python ; coding: utf-8 -*-
+
+          block_cipher = None
+
+          a = Analysis(
+              ['main.py'],
+              pathex=[],
+              binaries=[],
+              datas=[
+                  ('webbox_config.json', '.'),
+              ],
+              hiddenimports=[
+                  'PyQt5',
+                  'PyQt5.QtCore',
+                  'PyQt5.QtGui',
+                  'PyQt5.QtWidgets',
+                  'PyQt5.QtWebEngineWidgets',
+                  'PyQt5.QtWebEngineCore',
+                  'PyQt5.sip',
+                  'qt5applauncher',
+              ],
+              hookspath=[],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=[
+                  'tkinter',
+                  'matplotlib',
+                  'numpy',
+                  'pandas',
+                  'PIL',
+              ],
+              win_no_prefer_redirects=False,
+              win_private_assemblies=False,
+              cipher=block_cipher,
+              noarchive=False,
+          )
+
+          # 收集Qt WebEngine资源
+          from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+          
+          # 收集PyQt5数据文件
+          datas = []
+          datas += collect_data_files('PyQt5')
+          datas += collect_data_files('PyQt5.QtCore')
+          datas += collect_data_files('PyQt5.QtGui')
+          datas += collect_data_files('PyQt5.QtWidgets')
+          datas += collect_data_files('PyQt5.QtWebEngineWidgets')
+          datas += collect_data_files('PyQt5.QtWebEngineCore')
+          
+          # 添加WebEngine资源
+          import PyQt5.QtCore
+          qt_dir = Path(PyQt5.QtCore.__file__).parent
+          
+          # 收集Qt WebEngine Resources
+          resources_dir = qt_dir / 'resources'
+          if resources_dir.exists():
+              datas.append((str(resources_dir), 'Qt5Core/Resources'))
+          
+          # 收集Qt WebEngine
+          webengine_dir = qt_dir / 'QtWebEngine'
+          if webengine_dir.exists():
+              for item in webengine_dir.rglob('*'):
+                  if item.is_file():
+                      datas.append((str(item), f'Qt5WebEngine/{item.name}'))
+          
+          # 收集Qt5 WebEngine进程
+          webengineprocess_dir = qt_dir / 'QtWebEngineProcess'
+          if webengineprocess_dir.exists():
+              for item in webengineprocess_dir.rglob('*'):
+                  if item.is_file():
+                      datas.append((str(item), f'Qt5WebEngineProcess/{item.name}'))
+
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+          exe = EXE(
+              pyz,
+              a.scripts,
+              [],
+              exclude_binaries=True,
+              name='WebBox',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              console=True,
+              disable_windowed_traceback=False,
+              argv_emulation=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None,
+          )
+
+          coll = COLLECT(
+              exe,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              name='WebBox',
+          )
+          "@
+          $specContent | Out-File -FilePath "main.spec" -Encoding UTF8
+      
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --clean main.spec
+      
+      - name: Copy WebEngine resources
+        run: |
+          $qtDir = python -c "from PyQt5.QtCore import QLibraryInfo; print(QLibraryInfo.location(QLibraryInfo.LibraryExecutablesPath))"
+          Write-Host "Qt dir: $qtDir"
+          
+          # 复制WebEngine组件
+          $targetDir = "dist/WebBox"
+          if (!(Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
+          
+          # 复制QtWebEngine
+          Copy-Item -Path "dist/WebBox" -Destination "$targetDir" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          # 创建resources目录并复制
+          $resourcesDir = Join-Path $targetDir "resources"
+          if (!(Test-Path $resourcesDir)) { New-Item -ItemType Directory -Path $resourcesDir -Force | Out-Null }
+          
+          # 从安装位置复制WebEngine
+          $pyqtPath = python -c "import PyQt5; print(PyQt5.__path__[0])"
+          $webengineSrc = Join-Path $pyqtPath "QtWebEngine"
+          $webengineDest = Join-Path $targetDir "QtWebEngine"
+          
+          if (Test-Path $webengineSrc) {
+              Copy-Item -Path $webengineSrc -Destination $webengineDest -Recurse -Force
+              Write-Host "Copied QtWebEngine"
+          }
+          
+          $webengineProcessSrc = Join-Path $pyqtPath "QtWebEngineProcess"
+          $webengineProcessDest = Join-Path $targetDir "QtWebEngineProcess"
+          
+          if (Test-Path $webengineProcessSrc) {
+              Copy-Item -Path $webengineProcessSrc -Destination $webengineProcessDest -Recurse -Force
+              Write-Host "Copied QtWebEngineProcess"
+          }
+          
+          # 复制resources
+          $resourcesSrc = Join-Path $pyqtPath "resources"
+          if (Test-Path $resourcesSrc) {
+              Copy-Item -Path $resourcesSrc -Destination $resourcesDir -Recurse -Force
+              Write-Host "Copied resources"
+          }
+      
+      - name: Ensure WebBox.exe is created
+        run: |
+          if (Test-Path "dist/WebBox/WebBox.exe") {
+              Write-Host "WebBox.exe found!"
+              Get-ChildItem "dist/WebBox" -Recurse | Select-Object FullName, Length
+          } else {
+              Write-Host "Looking for exe files..."
+              Get-ChildItem "dist" -Recurse -Filter "*.exe" | Select-Object FullName, Length
+              Write-Host "WARNING: WebBox.exe not found in expected location"
+          }
+      
+      - name: Create portable zip
+        run: |
+          Compress-Archive -Path "dist/WebBox" -DestinationPath "WebBox-win64.zip" -Force
+          Write-Host "Created WebBox-win64.zip"
+          Get-Item "WebBox-win64.zip" | Select-Object Name, Length
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebBox-win64
+          path: |
+            dist/WebBox/
+            WebBox-win64.zip
+          retention-days: 30
+      
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: WebBox-win64.zip
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-portable:
+    runs-on: windows-latest
+    needs: build
+    
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WebBox-win64
+          path: downloaded
+      
+      - name: List files
+        run: |
+          Get-ChildItem "downloaded" -Recurse | Select-Object FullName, Length
+
+  test:
+    runs-on: windows-latest
+    needs: build
+    
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WebBox-win64
+          path: dist
+      
+      - name: Test executable
+        run: |
+          $exe = "dist/WebBox/WebBox.exe"
+          if (Test-Path $exe) {
+              Write-Host "Testing WebBox.exe..."
+              # 简短启动测试
+              $proc = Start-Process $exe -PassThru
+              Start-Sleep -Seconds 5
+              if (!$proc.HasExited) {
+                  Write-Host "Application started successfully!"
+                  Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                  Write-Host "Test PASSED"
+                  exit 0
+              } else {
+                  Write-Host "Application exited with code: $($proc.ExitCode)"
+                  Write-Host "Test FAILED"
+                  exit 1
+              }
+          } else {
+              Write-Host "WebBox.exe not found!"
+              exit 1
+          }
