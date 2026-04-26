@@ -27,8 +27,9 @@ def save_config(config):
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 class Api:
-    def __init__(self):
+    def __init__(self, on_save=None):
         self.config = load_config()
+        self.on_save = on_save
     
     def get_config(self):
         return self.config
@@ -37,6 +38,8 @@ class Api:
         self.config['url'] = url
         self.config['title'] = title
         save_config(self.config)
+        if self.on_save:
+            self.on_save(url, title)
         return {'status': 'ok', 'url': url, 'title': title}
 
 def create_settings_html(config):
@@ -148,6 +151,13 @@ main_window = None
 api = None
 systray = None
 
+def on_config_saved(url, title):
+    """配置保存后刷新主窗口"""
+    global main_window
+    if main_window:
+        main_window.load_url(url)
+        main_window.title = title
+
 def open_settings(systray_icon):
     """打开设置窗口"""
     global main_window, api
@@ -164,23 +174,21 @@ def open_settings(systray_icon):
 
 def reload_page(systray_icon):
     """刷新页面"""
-    global main_window, api
+    global main_window
     config = load_config()
     if main_window:
         main_window.load_url(config['url'])
 
 def quit_app(systray_icon):
     """退出程序"""
-    global main_window
-    if main_window:
-        main_window.destroy()
-    webview.shutdown()
+    import os
+    os._exit(0)
 
 def main():
     global main_window, api, systray
     
     config = load_config()
-    api = Api()
+    api = Api(on_save=on_config_saved)
     
     # 创建主窗口
     main_window = webview.create_window(
@@ -195,7 +203,9 @@ def main():
         ("刷新页面", None, reload_page),
         ("退出", None, quit_app),
     )
-    systray = SysTrayIcon("Kunzhancheng.ico", "WebBox", menu_options)
+    
+    # 使用默认图标（Windows会显示默认应用图标）
+    systray = SysTrayIcon("Kunzhancheng.ico", "WebBox", menu_options, default_menu_index=0)
     systray.start()
     
     webview.start()
