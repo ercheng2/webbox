@@ -249,17 +249,23 @@ def start_hotkey_listener():
     except Exception as e:
         print(f"快捷键监听失败: {e}")
 
-# ===== 获取屏幕尺寸 =====
+# ===== 获取屏幕工作区尺寸（去掉任务栏）=====
 def get_screen_size():
     try:
-        import tkinter as tk
-        root = tk.Tk()
-        width = root.winfo_screenwidth()
-        height = root.winfo_screenheight()
-        root.destroy()
+        import ctypes
+        # 使用Windows API获取工作区尺寸
+        class RECT(ctypes.Structure):
+            _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
+                       ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+        rect = RECT()
+        # SPI_GETWORKAREA = 48
+        ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
         return width, height
     except:
-        return 1920, 1080
+        # 非Windows系统或失败，返回默认值
+        return 1920, 1040
 
 # ===== 主程序 =====
 def main():
@@ -311,6 +317,19 @@ def main():
                 # 在窗口显示后切换全屏模式
                 if fullscreen:
                     browse_window.toggle_fullscreen()
+                else:
+                    # 非全屏模式：使用Windows API最大化窗口
+                    try:
+                        import ctypes
+                        import time
+                        time.sleep(0.1)  # 等窗口完全显示
+                        # 查找窗口
+                        hwnd = ctypes.windll.user32.FindWindowW(None, config.get('title', 'WebBox'))
+                        if hwnd:
+                            # SW_MAXIMIZE = 3
+                            ctypes.windll.user32.ShowWindow(hwnd, 3)
+                    except:
+                        pass
             except:
                 pass
         
