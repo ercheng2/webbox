@@ -74,8 +74,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
     <div class="hint">
         💡 按 F1 可随时打开此设置窗口<br>
         • 全屏模式：窗口覆盖整个屏幕，包括任务栏<br>
-        • 窗口模式：显示任务栏，方便切换应用<br>
-        • 所有网页操作都在盒子内进行
+        • 窗口模式：显示任务栏，方便切换应用
     </div>
     <button class="btn" onclick="saveAndReload()">保存</button>
 </div>
@@ -178,14 +177,6 @@ def main():
             fullscreen=fullscreen,
             js_api=api
         )
-        
-        # 拦截新窗口请求，在当前窗口打开
-        def on_new_window(url):
-            # 新窗口请求时，在当前窗口加载该URL
-            if browse_window:
-                browse_window.load_url(url)
-        
-        browse_window.events.new_window += on_new_window
         
         if not fullscreen:
             import ctypes
