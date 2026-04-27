@@ -202,14 +202,16 @@ def main():
         browse_window = webview.create_window(
             config.get('title', 'WebBox'),
             config['url'],
-            fullscreen=fullscreen,
             js_api=api
         )
         
-        # 页面加载完成后注入拦截脚本
+        # 页面加载完成后注入拦截脚本并设置全屏
         def on_loaded():
             try:
                 browse_window.evaluate_js(INTERCEPT_LINKS_JS)
+                # 在窗口显示后切换全屏模式
+                if fullscreen:
+                    browse_window.toggle_fullscreen()
             except:
                 pass
         
