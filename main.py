@@ -228,7 +228,7 @@ def main():
         global browse_window
         fullscreen = config.get('fullscreen', True)
         
-        # 非全屏模式下使用屏幕尺寸（任务栏会自动留出空间）
+        # 非全屏模式下使用屏幕尺寸，定位到(0,0)
         window_args = {
             'title': config.get('title', 'WebBox'),
             'url': config['url'],
@@ -237,6 +237,8 @@ def main():
         if not fullscreen:
             window_args['width'] = screen_width
             window_args['height'] = screen_height
+            window_args['x'] = 0
+            window_args['y'] = 0
         
         browse_window = webview.create_window(**window_args)
         
