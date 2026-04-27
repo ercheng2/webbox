@@ -191,6 +191,7 @@ titleInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 
 # ===== 全局变量 =====
 browse_window = None
+current_fullscreen = True  # 记录当前全屏状态
 
 # ===== API =====
 class BrowseApi:
@@ -198,7 +199,7 @@ class BrowseApi:
         return load_config()
     
     def save_and_reload(self, url, title, fullscreen):
-        global browse_window
+        global browse_window, current_fullscreen
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -212,6 +213,10 @@ class BrowseApi:
         save_config(config)
         if browse_window:
             browse_window.load_url(url)
+            # 实时切换全屏模式
+            if fullscreen != current_fullscreen:
+                browse_window.toggle_fullscreen()
+                current_fullscreen = fullscreen
         return {'ok': True}
 
 class SettingsApi:
@@ -258,8 +263,10 @@ def get_screen_size():
 
 # ===== 主程序 =====
 def main():
+    global current_fullscreen
     config = load_config()
     screen_width, screen_height = get_screen_size()
+    current_fullscreen = config.get('fullscreen', True)  # 初始化全屏状态
     
     # 启动全局快捷键监听
     hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
@@ -270,13 +277,18 @@ def main():
         global browse_window
         fullscreen = config.get('fullscreen', True)
         
-        # 非全屏模式下使用屏幕尺寸，定位到(0,0)
+        # 窗口参数
         window_args = {
             'title': config.get('title', 'WebBox'),
             'url': config['url'],
             'js_api': api
         }
-        if not fullscreen:
+        
+        if fullscreen:
+            # 全屏模式：创建后再切换
+            pass
+        else:
+            # 非全屏模式：最大化窗口，定位到(0,0)
             window_args['width'] = screen_width
             window_args['height'] = screen_height
             window_args['x'] = 0
@@ -287,6 +299,14 @@ def main():
         # 页面加载完成后注入拦截脚本并设置全屏
         def on_loaded():
             try:
+                # 注入允许选择的CSS
+                browse_window.evaluate_js('''
+                    (function() {
+                        var style = document.createElement('style');
+                        style.innerHTML = '* { user-select: text !important; -webkit-user-select: text !important; }';
+                        document.head.appendChild(style);
+                    })();
+                ''')
                 browse_window.evaluate_js(INTERCEPT_LINKS_JS)
                 # 在窗口显示后切换全屏模式
                 if fullscreen:
