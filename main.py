@@ -22,7 +22,6 @@ def load_config():
             with open(config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, dict) and data.get('url'):
-                    # 兼容旧配置，默认全屏
                     if 'fullscreen' not in data:
                         data['fullscreen'] = True
                     return data
@@ -75,7 +74,8 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
     <div class="hint">
         💡 按 F1 可随时打开此设置窗口<br>
         • 全屏模式：窗口覆盖整个屏幕，包括任务栏<br>
-        • 窗口模式：显示任务栏，方便切换应用
+        • 窗口模式：显示任务栏，方便切换应用<br>
+        • 所有网页操作都在盒子内进行
     </div>
     <button class="btn" onclick="saveAndReload()">保存</button>
 </div>
@@ -126,7 +126,6 @@ class BrowseApi:
         save_config(config)
         if browse_window:
             browse_window.load_url(url)
-            # 切换全屏状态
             if fullscreen:
                 browse_window.toggle_fullscreen()
         return {'ok': True}
@@ -155,7 +154,7 @@ def start_hotkey_listener():
         import keyboard
         def open_settings():
             api = BrowseApi()
-            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=540, resizable=False)
+            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
         keyboard.add_hotkey('f1', open_settings)
         keyboard.wait()
     except Exception as e:
@@ -179,19 +178,25 @@ def main():
             fullscreen=fullscreen,
             js_api=api
         )
-        # 如果非全屏模式，设置合适的窗口大小
+        
+        # 拦截新窗口请求，在当前窗口打开
+        def on_new_window(url):
+            # 新窗口请求时，在当前窗口加载该URL
+            if browse_window:
+                browse_window.load_url(url)
+        
+        browse_window.events.new_window += on_new_window
+        
         if not fullscreen:
-            # 获取屏幕尺寸并设置窗口大小（保留任务栏空间）
             import ctypes
             user32 = ctypes.windll.user32
             screen_width = user32.GetSystemMetrics(0)
             screen_height = user32.GetSystemMetrics(1)
-            # 窗口模式：最大化但不覆盖任务栏
             browse_window.resize(screen_width, screen_height - 40)
             browse_window.move(0, 0)
     else:
         api = SettingsApi()
-        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=540, resizable=False)
+        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
     
     webview.start()
 
