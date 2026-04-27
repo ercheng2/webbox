@@ -34,6 +34,50 @@ def save_config(data):
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# ===== 拦截外链的JS代码 =====
+INTERCEPT_LINKS_JS = '''
+(function() {
+    // 拦截所有链接点击
+    document.addEventListener('click', function(e) {
+        var target = e.target;
+        // 向上查找最近的a标签
+        while (target && target.tagName !== 'A') {
+            target = target.parentElement;
+        }
+        if (target && target.tagName === 'A') {
+            var href = target.getAttribute('href');
+            if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.location.href = href;
+                return false;
+            }
+        }
+    }, true);
+    
+    // 拦截window.open
+    var originalOpen = window.open;
+    window.open = function(url) {
+        window.location.href = url;
+        return null;
+    };
+    
+    // 拦截target="_blank"的表单
+    document.addEventListener('submit', function(e) {
+        var form = e.target;
+        if (form.tagName === 'FORM' && form.target === '_blank') {
+            form.target = '_self';
+        }
+    }, true);
+    
+    // 处理base target
+    var base = document.querySelector('base[target="_blank"]');
+    if (base) {
+        base.setAttribute('target', '_self');
+    }
+})();
+'''
+
 # ===== 设置页面HTML =====
 SETTINGS_HTML = '''<!DOCTYPE html>
 <html>
@@ -74,7 +118,8 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
     <div class="hint">
         💡 按 F1 可随时打开此设置窗口<br>
         • 全屏模式：窗口覆盖整个屏幕，包括任务栏<br>
-        • 窗口模式：显示任务栏，方便切换应用
+        • 窗口模式：显示任务栏，方便切换应用<br>
+        • 所有链接都在盒子内打开
     </div>
     <button class="btn" onclick="saveAndReload()">保存</button>
 </div>
@@ -153,7 +198,7 @@ def start_hotkey_listener():
         import keyboard
         def open_settings():
             api = BrowseApi()
-            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
+            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=580, resizable=False)
         keyboard.add_hotkey('f1', open_settings)
         keyboard.wait()
     except Exception as e:
@@ -178,6 +223,15 @@ def main():
             js_api=api
         )
         
+        # 页面加载完成后注入拦截脚本
+        def on_loaded():
+            try:
+                browse_window.evaluate_js(INTERCEPT_LINKS_JS)
+            except Exception as e:
+                print(f"注入脚本失败: {e}")
+        
+        browse_window.events.loaded += on_loaded
+        
         if not fullscreen:
             import ctypes
             user32 = ctypes.windll.user32
@@ -187,7 +241,7 @@ def main():
             browse_window.move(0, 0)
     else:
         api = SettingsApi()
-        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
+        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=580, resizable=False)
     
     webview.start()
 
