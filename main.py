@@ -113,12 +113,27 @@ var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
 
-pywebview.api.get_config().then(function(c) {
-    if (c.url) urlInput.value = c.url;
-    if (c.title) titleInput.value = c.title;
-    fullscreenCheck.checked = c.fullscreen !== false;
-    urlInput.focus();
-});
+// 等待API准备好再加载配置
+function loadConfig() {
+    if (window.pywebview && window.pywebview.api) {
+        pywebview.api.get_config().then(function(c) {
+            if (c.url) urlInput.value = c.url;
+            if (c.title) titleInput.value = c.title;
+            fullscreenCheck.checked = c.fullscreen !== false;
+            urlInput.focus();
+        }).catch(function(err) {
+            console.log('加载配置失败，重试...');
+            setTimeout(loadConfig, 100);
+        });
+    } else {
+        setTimeout(loadConfig, 100);
+    }
+}
+
+// 监听pywebview ready事件
+window.addEventListener('pywebviewready', loadConfig);
+// 备用：延迟加载
+setTimeout(loadConfig, 300);
 
 function saveAndReload() {
     var url = urlInput.value.trim();
@@ -187,9 +202,22 @@ def start_hotkey_listener():
     except Exception as e:
         print(f"快捷键监听失败: {e}")
 
+# ===== 获取屏幕尺寸 =====
+def get_screen_size():
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        width = root.winfo_screenwidth()
+        height = root.winfo_screenheight()
+        root.destroy()
+        return width, height
+    except:
+        return 1920, 1080
+
 # ===== 主程序 =====
 def main():
     config = load_config()
+    screen_width, screen_height = get_screen_size()
     
     # 启动全局快捷键监听
     hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
@@ -199,11 +227,18 @@ def main():
         api = BrowseApi()
         global browse_window
         fullscreen = config.get('fullscreen', True)
-        browse_window = webview.create_window(
-            config.get('title', 'WebBox'),
-            config['url'],
-            js_api=api
-        )
+        
+        # 非全屏模式下使用屏幕尺寸（任务栏会自动留出空间）
+        window_args = {
+            'title': config.get('title', 'WebBox'),
+            'url': config['url'],
+            'js_api': api
+        }
+        if not fullscreen:
+            window_args['width'] = screen_width
+            window_args['height'] = screen_height
+        
+        browse_window = webview.create_window(**window_args)
         
         # 页面加载完成后注入拦截脚本并设置全屏
         def on_loaded():
