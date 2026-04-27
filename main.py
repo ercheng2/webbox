@@ -37,34 +37,76 @@ def save_config(data):
 # ===== 拦截外链的JS代码 =====
 INTERCEPT_LINKS_JS = '''
 (function() {
+    // 拦截所有点击事件，防止跳转到外部浏览器
     document.addEventListener('click', function(e) {
         var target = e.target;
+        // 向上查找A标签
         while (target && target.tagName !== 'A') {
             target = target.parentElement;
         }
         if (target && target.tagName === 'A') {
             var href = target.getAttribute('href');
-            if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+            if (href && !href.startsWith('javascript:') && !href.startsWith('#') && !href.startsWith('mailto:')) {
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation();
+                // 强制在当前窗口打开
+                target.target = '_self';
                 window.location.href = href;
                 return false;
             }
         }
     }, true);
     
+    // 拦截window.open
     var originalOpen = window.open;
-    window.open = function(url) {
+    window.open = function(url, target, features) {
+        // 强制在当前窗口打开
         window.location.href = url;
         return null;
     };
     
+    // 拦截表单提交
     document.addEventListener('submit', function(e) {
         var form = e.target;
-        if (form.tagName === 'FORM' && form.target === '_blank') {
+        if (form.tagName === 'FORM') {
             form.target = '_self';
         }
     }, true);
+    
+    // 拦截右键菜单中的"在新窗口打开"
+    document.addEventListener('contextmenu', function(e) {
+        var target = e.target;
+        while (target && target.tagName !== 'A') {
+            target = target.parentElement;
+        }
+        if (target && target.tagName === 'A') {
+            target.target = '_self';
+        }
+    }, true);
+    
+    // 动态监控DOM，处理后来添加的链接
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.tagName === 'A') {
+                    node.target = '_self';
+                }
+                if (node.querySelectorAll) {
+                    var links = node.querySelectorAll('a');
+                    links.forEach(function(link) {
+                        link.target = '_self';
+                    });
+                }
+            });
+        });
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    
+    // 处理所有现有链接
+    document.querySelectorAll('a').forEach(function(link) {
+        link.target = '_self';
+    });
 })();
 '''
 
@@ -257,7 +299,7 @@ def main():
         api = SettingsApi()
         webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
     
-    webview.start()
+    webview.start(private_mode=False)
 
 if __name__ == '__main__':
     main()
