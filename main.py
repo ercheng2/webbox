@@ -65,7 +65,7 @@ INTERCEPT_LINKS_JS = '''
         }, 5000);
     };
     
-    // ===== 统一的点击拦截 =====
+    // ===== 点击拦截：所有链接交给Python =====
     document.addEventListener('click', function(e) {
         var target = e.target;
         while (target && target.tagName !== 'A') {
@@ -77,7 +77,6 @@ INTERCEPT_LINKS_JS = '''
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                // 交给Python处理
                 if (window.pywebview && window.pywebview.api) {
                     pywebview.api.handle_link(href);
                 }
@@ -133,7 +132,6 @@ INTERCEPT_LINKS_JS = '''
     });
     observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
     
-    // ===== 处理所有现有链接 =====
     document.querySelectorAll('a').forEach(function(link) {
         link.target = '_self';
     });
@@ -218,7 +216,7 @@ titleInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 # ===== 全局变量 =====
 browse_window = None
 current_fullscreen = True
-_pending_download_url = None  # 记录需要下载的URL
+_last_url = ''  # 记录上一个正常页面URL
 
 # ===== 判断URL是否为文件下载 =====
 DOWNLOAD_EXTS = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
@@ -259,6 +257,112 @@ def check_url_is_download(url):
     except:
         return False
 
+# ===== 下载逻辑 =====
+def do_download(url, go_back=False):
+    """执行下载"""
+    import json as _json
+    global browse_window
+    
+    def _download():
+        try:
+            # 解析相对URL
+            if not url.startswith('http'):
+                try:
+                    current_url = browse_window.get_current_url() if browse_window else ''
+                    if current_url:
+                        url_full = urllib.parse.urljoin(current_url, url)
+                    else:
+                        url_full = 'https://' + url
+                except:
+                    url_full = 'https://' + url
+            else:
+                url_full = url
+            
+            # 下载目录
+            if sys.platform == 'win32':
+                download_dir = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
+            else:
+                download_dir = Path.home() / 'Downloads' / 'WebBox'
+            download_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 先用HEAD获取真实文件名
+            filename = 'download'
+            try:
+                req = urllib.request.Request(url_full, method='HEAD')
+                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                resp = urllib.request.urlopen(req, timeout=10)
+                disp = resp.headers.get('Content-Disposition', '')
+                if 'filename' in disp:
+                    m = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^;"\']+)["\']?', disp)
+                    if m:
+                        filename = urllib.parse.unquote(m.group(1))
+            except:
+                pass
+            
+            if filename == 'download':
+                filename = url_full.split('/')[-1].split('?')[0] or 'download'
+            
+            filepath = download_dir / filename
+            
+            # 通知：正在下载
+            notify_js = 'window.__webbox_download_result({}, {})'.format(
+                _json.dumps(filename),
+                _json.dumps('📥 正在下载...')
+            )
+            try:
+                browse_window.evaluate_js(notify_js)
+            except:
+                pass
+            
+            # 下载文件
+            req = urllib.request.Request(url_full)
+            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            resp = urllib.request.urlopen(req, timeout=120)
+            
+            with open(str(filepath), 'wb') as f:
+                while True:
+                    chunk = resp.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            
+            # 通知：下载完成
+            notify_js = 'window.__webbox_download_result({}, {})'.format(
+                _json.dumps(filename),
+                _json.dumps('✅ 下载完成: ' + str(filepath))
+            )
+            try:
+                browse_window.evaluate_js(notify_js)
+            except:
+                pass
+            
+            # 下载完成后回到上一页
+            if go_back:
+                try:
+                    time.sleep(1)
+                    browse_window.evaluate_js('window.history.back();')
+                except:
+                    pass
+                
+        except Exception as e:
+            notify_js = 'window.__webbox_download_result({}, {})'.format(
+                _json.dumps('download'),
+                _json.dumps('❌ 下载失败: ' + str(e))
+            )
+            try:
+                browse_window.evaluate_js(notify_js)
+            except:
+                pass
+            if go_back:
+                try:
+                    time.sleep(2)
+                    browse_window.evaluate_js('window.history.back();')
+                except:
+                    pass
+    
+    t = threading.Thread(target=_download, daemon=True)
+    t.start()
+
 # ===== API =====
 class BrowseApi:
     def get_config(self):
@@ -266,7 +370,7 @@ class BrowseApi:
     
     def handle_link(self, href):
         """处理所有链接点击：判断是下载还是导航"""
-        global browse_window, _pending_download_url
+        global browse_window, _last_url
         
         # 解析相对URL
         if not href.startswith('http://') and not href.startswith('https://'):
@@ -281,18 +385,16 @@ class BrowseApi:
         
         # 快速检查：URL扩展名是下载文件
         if is_download_by_ext(href):
-            _pending_download_url = href
-            self._do_download(href, go_back=True)
+            do_download(href, go_back=True)
             return {'action': 'download'}
         
         # 后台检查：HEAD请求判断是否为下载
         def check_and_handle():
-            global _pending_download_url
             try:
                 if check_url_is_download(href):
-                    _pending_download_url = href
-                    self._do_download(href, go_back=True)
+                    do_download(href, go_back=True)
                 else:
+                    # 不是下载，正常导航
                     if browse_window:
                         browse_window.load_url(href)
             except:
@@ -302,111 +404,6 @@ class BrowseApi:
         t = threading.Thread(target=check_and_handle, daemon=True)
         t.start()
         return {'action': 'checking'}
-    
-    def download_file(self, url):
-        self._do_download(url, go_back=True)
-        return {'ok': True}
-    
-    def _do_download(self, url, go_back=False):
-        """执行下载，完成后回到上一页"""
-        import json as _json
-        
-        def do_download():
-            try:
-                # 解析相对URL
-                if not url.startswith('http'):
-                    try:
-                        current_url = browse_window.get_current_url() if browse_window else ''
-                        if current_url:
-                            url = urllib.parse.urljoin(current_url, url)
-                    except:
-                        pass
-                
-                # 下载目录
-                if sys.platform == 'win32':
-                    download_dir = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
-                else:
-                    download_dir = Path.home() / 'Downloads' / 'WebBox'
-                download_dir.mkdir(parents=True, exist_ok=True)
-                
-                # 先用HEAD获取真实文件名
-                filename = 'download'
-                try:
-                    req = urllib.request.Request(url, method='HEAD')
-                    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-                    resp = urllib.request.urlopen(req, timeout=10)
-                    disp = resp.headers.get('Content-Disposition', '')
-                    if 'filename' in disp:
-                        m = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^;"\']+)["\']?', disp)
-                        if m:
-                            filename = urllib.parse.unquote(m.group(1))
-                except:
-                    pass
-                
-                if filename == 'download':
-                    filename = url.split('/')[-1].split('?')[0] or 'download'
-                
-                filepath = download_dir / filename
-                
-                # 通知：正在下载
-                notify_js = 'window.__webbox_download_result({}, {})'.format(
-                    _json.dumps(filename),
-                    _json.dumps('📥 正在下载...')
-                )
-                try:
-                    browse_window.evaluate_js(notify_js)
-                except:
-                    pass
-                
-                # 下载文件
-                req = urllib.request.Request(url)
-                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-                resp = urllib.request.urlopen(req, timeout=120)
-                
-                with open(str(filepath), 'wb') as f:
-                    while True:
-                        chunk = resp.read(8192)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                
-                # 通知：下载完成
-                notify_js = 'window.__webbox_download_result({}, {})'.format(
-                    _json.dumps(filename),
-                    _json.dumps('✅ 下载完成: ' + str(filepath))
-                )
-                try:
-                    browse_window.evaluate_js(notify_js)
-                except:
-                    pass
-                
-                # 下载完成后回到上一页
-                if go_back:
-                    try:
-                        time.sleep(1)
-                        browse_window.evaluate_js('window.history.back();')
-                    except:
-                        pass
-                    
-            except Exception as e:
-                notify_js = 'window.__webbox_download_result({}, {})'.format(
-                    _json.dumps('download'),
-                    _json.dumps('❌ 下载失败: ' + str(e))
-                )
-                try:
-                    browse_window.evaluate_js(notify_js)
-                except:
-                    pass
-                # 失败也回到上一页
-                if go_back:
-                    try:
-                        time.sleep(2)
-                        browse_window.evaluate_js('window.history.back();')
-                    except:
-                        pass
-        
-        t = threading.Thread(target=do_download, daemon=True)
-        t.start()
     
     def save_and_reload(self, url, title, fullscreen):
         global browse_window, current_fullscreen
@@ -473,40 +470,50 @@ def get_screen_size():
     except:
         return 1920, 1040
 
-# ===== 拦截浏览器下载弹窗 =====
-def patch_download_handler():
-    """Hook pywebview的下载处理，取消浏览器原生下载，改用自己的下载逻辑"""
+# ===== Hook浏览器下载+导航拦截 =====
+def patch_edgechromium():
+    """Hook WebView2的下载和导航，从底层拦截"""
     try:
         from webview.platforms import edgechromium
+        
+        # 1. Hook下载事件：取消浏览器原生下载，改用自己下载
         original_on_download = edgechromium.Browser.on_download_starting
         
         def custom_on_download(self, sender, args):
-            global _pending_download_url
-            # 取消浏览器原生下载
-            args.Cancel = True
-            # 获取下载URL
-            download_url = str(args.ContentUri) if hasattr(args, 'ContentUri') else ''
+            global browse_window
+            args.Cancel = True  # 取消浏览器原生下载弹窗
+            download_url = ''
+            try:
+                download_url = str(args.ContentUri)
+            except:
+                pass
             if not download_url:
-                download_url = str(args.ResultFilePath) if hasattr(args, 'ResultFilePath') else ''
-            
-            print(f"[WebBox] 拦截浏览器下载: {download_url}")
-            
-            # 用自己的下载逻辑
+                try:
+                    download_url = str(args.ResultFilePath)
+                except:
+                    pass
+            print(f"[WebBox] 拦截下载: {download_url}")
             if download_url and browse_window:
-                api = BrowseApi()
-                api._do_download(download_url, go_back=True)
+                do_download(download_url, go_back=True)
         
         edgechromium.Browser.on_download_starting = custom_on_download
+        
+        # 2. Hook导航事件：检测到导航到下载URL时取消导航
+        original_on_navigation = edgechromium.Browser.on_navigation_starting if hasattr(edgechromium.Browser, 'on_navigation_starting') else None
+        
         print("[WebBox] 已Hook下载处理器")
     except Exception as e:
         print(f"[WebBox] Hook下载处理器失败: {e}")
 
 # ===== 主程序 =====
 def main():
-    global current_fullscreen
+    global current_fullscreen, browse_window, _last_url
     
-    # 拦截浏览器下载弹窗
-    patch_download_handler()
+    # Hook底层
+    patch_edgechromium()
+    
+    # 禁止pywebview原生下载弹窗
+    webview.settings['ALLOW_DOWNLOADS'] = False
     
     config = load_config()
     screen_width, screen_height = get_screen_size()
@@ -517,8 +524,8 @@ def main():
     
     if config.get('url'):
         api = BrowseApi()
-        global browse_window
         fullscreen = config.get('fullscreen', True)
+        _last_url = config['url']
         
         window_args = {
             'title': config.get('title', 'WebBox'),
@@ -535,7 +542,15 @@ def main():
         browse_window = webview.create_window(**window_args)
         
         def on_loaded():
+            global _last_url
             try:
+                # 记录当前URL
+                try:
+                    _last_url = browse_window.get_current_url()
+                except:
+                    pass
+                
+                # 注入CSS
                 browse_window.evaluate_js('''
                     (function() {
                         var style = document.createElement('style');
@@ -543,7 +558,9 @@ def main():
                         document.head.appendChild(style);
                     })();
                 ''')
+                # 注入链接拦截JS
                 browse_window.evaluate_js(INTERCEPT_LINKS_JS)
+                
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:
@@ -558,7 +575,30 @@ def main():
             except:
                 pass
         
+        def on_before_load(url):
+            """导航前拦截：检测下载URL则取消导航"""
+            global _last_url
+            try:
+                if is_download_by_ext(url):
+                    print(f"[WebBox] 导航拦截(扩展名): {url}")
+                    do_download(url, go_back=True)
+                    return False  # 取消导航
+                
+                # 对非本地URL做HEAD检测
+                if url.startswith('http://') or url.startswith('https://'):
+                    if check_url_is_download(url):
+                        print(f"[WebBox] 导航拦截(HEAD检测): {url}")
+                        do_download(url, go_back=True)
+                        return False  # 取消导航
+                
+                # 正常导航，记录URL
+                _last_url = url
+            except:
+                pass
+            return True  # 允许导航
+        
         browse_window.events.loaded += on_loaded
+        browse_window.events.before_load += on_before_load
     else:
         api = SettingsApi()
         webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
