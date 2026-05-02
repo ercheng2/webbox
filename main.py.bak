@@ -39,48 +39,10 @@ def save_config(data):
 # ===== 拦截外链的JS代码 =====
 INTERCEPT_LINKS_JS = '''
 (function() {
-    // ===== 下载文件扩展名列表 =====
-    var downloadExts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
-                        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-                        '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv',
-                        '.iso', '.dmg', '.deb', '.rpm', '.apk'];
-    
-    function isDownloadUrl(url) {
-        if (!url) return false;
-        var lower = url.toLowerCase().split('?')[0].split('#')[0];
-        for (var i = 0; i < downloadExts.length; i++) {
-            if (lower.endsWith(downloadExts[i])) return true;
-        }
-        return false;
-    }
-    
-    // ===== 显示下载通知 =====
-    function showDownloadNotify(filename, status) {
-        var box = document.getElementById('__webbox_download_notify');
-        if (!box) {
-            box = document.createElement('div');
-            box.id = '__webbox_download_notify';
-            box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;pointer-events:none;';
-            document.body.appendChild(box);
-        }
-        box.innerHTML = '<div style="background:rgba(30,30,40,0.95);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;min-width:220px;box-shadow:0 4px 20px rgba(0,0,0,0.4);margin-bottom:8px">' +
-            '<div style="font-weight:600;margin-bottom:4px">' + status + '</div>' +
-            '<div style="color:#aaa;font-size:12px;word-break:break-all">' + filename + '</div>' +
-            '</div>';
-    }
-    
-    // ===== 下载结果回调 =====
-    window.__webbox_download_result = function(filename, status) {
-        showDownloadNotify(filename, status);
-        setTimeout(function() {
-            var box = document.getElementById('__webbox_download_notify');
-            if (box) box.innerHTML = '';
-        }, 5000);
-    };
-    
-    // ===== 统一的点击拦截（下载优先）=====
+    // 拦截所有点击事件，防止跳转到外部浏览器
     document.addEventListener('click', function(e) {
         var target = e.target;
+        // 向上查找A标签
         while (target && target.tagName !== 'A') {
             target = target.parentElement;
         }
@@ -90,39 +52,23 @@ INTERCEPT_LINKS_JS = '''
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                
-                // 判断是否为下载链接
-                if (isDownloadUrl(href)) {
-                    var filename = href.split('/').pop().split('?')[0] || 'download';
-                    showDownloadNotify(filename, '📥 正在下载...');
-                    if (window.pywebview && window.pywebview.api) {
-                        pywebview.api.download_file(href);
-                    }
-                } else {
-                    // 普通链接：在当前窗口打开
-                    target.target = '_self';
-                    window.location.href = href;
-                }
+                // 强制在当前窗口打开
+                target.target = '_self';
+                window.location.href = href;
                 return false;
             }
         }
     }, true);
     
-    // ===== 拦截window.open =====
+    // 拦截window.open
+    var originalOpen = window.open;
     window.open = function(url, target, features) {
-        if (isDownloadUrl(url)) {
-            var filename = url.split('/').pop().split('?')[0] || 'download';
-            showDownloadNotify(filename, '📥 正在下载...');
-            if (window.pywebview && window.pywebview.api) {
-                pywebview.api.download_file(url);
-            }
-            return null;
-        }
+        // 强制在当前窗口打开
         window.location.href = url;
         return null;
     };
     
-    // ===== 拦截表单提交 =====
+    // 拦截表单提交
     document.addEventListener('submit', function(e) {
         var form = e.target;
         if (form.tagName === 'FORM') {
@@ -130,7 +76,7 @@ INTERCEPT_LINKS_JS = '''
         }
     }, true);
     
-    // ===== 拦截右键"在新窗口打开" =====
+    // 拦截右键菜单中的"在新窗口打开"
     document.addEventListener('contextmenu', function(e) {
         var target = e.target;
         while (target && target.tagName !== 'A') {
@@ -141,7 +87,7 @@ INTERCEPT_LINKS_JS = '''
         }
     }, true);
     
-    // ===== 动态监控DOM =====
+    // 动态监控DOM，处理后来添加的链接
     var observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             mutation.addedNodes.forEach(function(node) {
@@ -159,11 +105,78 @@ INTERCEPT_LINKS_JS = '''
     });
     observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
     
-    // ===== 处理所有现有链接 =====
+    // 处理所有现有链接
     document.querySelectorAll('a').forEach(function(link) {
         link.target = '_self';
     });
-})();'''
+    
+    // ===== 下载拦截 =====
+    // 下载文件扩展名列表
+    var downloadExts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
+                        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                        '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv',
+                        '.iso', '.dmg', '.deb', '.rpm', '.apk'];
+    
+    function isDownloadUrl(url) {
+        if (!url) return false;
+        var lower = url.toLowerCase().split('?')[0].split('#')[0];
+        for (var i = 0; i < downloadExts.length; i++) {
+            if (lower.endsWith(downloadExts[i])) return true;
+        }
+        return false;
+    }
+    
+    // 显示下载通知
+    function showDownloadNotify(filename, status, progress) {
+        var box = document.getElementById('__webbox_download_notify');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = '__webbox_download_notify';
+            box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;pointer-events:none;';
+            document.body.appendChild(box);
+        }
+        var progressBar = progress ? '<div style="margin-top:6px;height:4px;background:#333;border-radius:2px;overflow:hidden"><div style="height:100%;background:#667eea;width:' + progress + '%;border-radius:2px"></div></div>' : '';
+        box.innerHTML = '<div style="background:rgba(30,30,40,0.95);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;min-width:220px;box-shadow:0 4px 20px rgba(0,0,0,0.4);margin-bottom:8px">' +
+            '<div style="font-weight:600;margin-bottom:4px">📥 ' + status + '</div>' +
+            '<div style="color:#aaa;font-size:12px;word-break:break-all">' + filename + '</div>' +
+            progressBar +
+            '</div>';
+    }
+    
+    // 监听pywebview下载回调
+    window.__webbox_download_result = function(filename, status) {
+        showDownloadNotify(filename, status);
+        // 3秒后自动消失
+        setTimeout(function() {
+            var box = document.getElementById('__webbox_download_notify');
+            if (box) box.innerHTML = '';
+        }, 5000);
+    };
+    
+    // 拦截原来的点击，增加下载判断
+    document.addEventListener('click', function(e) {
+        var target = e.target;
+        while (target && target.tagName !== 'A') {
+            target = target.parentElement;
+        }
+        if (target && target.tagName === 'A') {
+            var href = target.getAttribute('href');
+            if (href && isDownloadUrl(href)) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                // 调用Python下载
+                var filename = href.split('/').pop().split('?')[0] || 'download';
+                showDownloadNotify(filename, '正在下载...');
+                if (window.pywebview && window.pywebview.api) {
+                    pywebview.api.download_file(href);
+                }
+                return false;
+            }
+        }
+    }, true);
+})();
+'''
 
 # ===== 设置页面HTML =====
 SETTINGS_HTML = '''<!DOCTYPE html>
@@ -285,16 +298,14 @@ class BrowseApi:
                 urllib.request.urlretrieve(url_resolved, str(filepath))
                 
                 # 通知前端
-                import json as _json
-                notify_js = 'window.__webbox_download_result({}, {})'.format(
-                    _json.dumps(filename),
-                    _json.dumps('下载完成: ' + str(filepath))
+                notify_js = 'window.__webbox_download_result("{}", "下载完成: {}")'.format(
+                    filename.replace('\', '\\').replace('"', '\"'),
+                    str(filepath).replace('\', '\\').replace('"', '\"')
                 )
                 browse_window.evaluate_js(notify_js)
             except Exception as e:
-                notify_js = 'window.__webbox_download_result({}, {})'.format(
-                    _json.dumps('download'),
-                    _json.dumps('下载失败: ' + str(e))
+                notify_js = 'window.__webbox_download_result("download", "下载失败: {}")'.format(
+                    str(e).replace('\', '\\').replace('"', '\"')
                 )
                 try:
                     browse_window.evaluate_js(notify_js)

@@ -20,8 +20,14 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v3.14-${{ github.run_number }}
-        name: WebBox v3.14 Build ${{ github.run_number }}
+        tag_name: v3.15-${{ github.run_number }}
+        name: "WebBox v3.15 - 内置下载支持"
+        body: |
+          更新内容：
+          - 点击下载链接自动在WebBox内下载
+          - 下载文件保存到 Downloads/WebBox 目录
+          - 页面内显示下载状态通知
+          - 支持exe/zip/pdf/doc/xls/ppt/音视频等格式自动识别
         files: dist/WebBox.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
