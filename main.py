@@ -3,9 +3,11 @@ import json
 import sys
 import os
 import threading
-from pathlib import Path
 import urllib.request
+import urllib.parse
 import time
+import re
+from pathlib import Path
 
 # ===== 配置管理 =====
 def get_config_path():
@@ -36,30 +38,15 @@ def save_config(data):
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ===== 拦截外链的JS代码 =====
+# ===== 拦截外链+下载的JS代码 =====
 INTERCEPT_LINKS_JS = '''
 (function() {
-    // ===== 下载文件扩展名列表 =====
-    var downloadExts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
-                        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-                        '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv',
-                        '.iso', '.dmg', '.deb', '.rpm', '.apk'];
-    
-    function isDownloadUrl(url) {
-        if (!url) return false;
-        var lower = url.toLowerCase().split('?')[0].split('#')[0];
-        for (var i = 0; i < downloadExts.length; i++) {
-            if (lower.endsWith(downloadExts[i])) return true;
-        }
-        return false;
-    }
-    
     // ===== 显示下载通知 =====
-    function showDownloadNotify(filename, status) {
-        var box = document.getElementById('__webbox_download_notify');
+    function showNotify(filename, status) {
+        var box = document.getElementById('__webbox_notify');
         if (!box) {
             box = document.createElement('div');
-            box.id = '__webbox_download_notify';
+            box.id = '__webbox_notify';
             box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;pointer-events:none;';
             document.body.appendChild(box);
         }
@@ -69,16 +56,16 @@ INTERCEPT_LINKS_JS = '''
             '</div>';
     }
     
-    // ===== 下载结果回调 =====
+    // ===== Python回调：下载结果 =====
     window.__webbox_download_result = function(filename, status) {
-        showDownloadNotify(filename, status);
+        showNotify(filename, status);
         setTimeout(function() {
-            var box = document.getElementById('__webbox_download_notify');
+            var box = document.getElementById('__webbox_notify');
             if (box) box.innerHTML = '';
         }, 5000);
     };
     
-    // ===== 统一的点击拦截（下载优先）=====
+    // ===== 所有链接点击都交给Python判断 =====
     document.addEventListener('click', function(e) {
         var target = e.target;
         while (target && target.tagName !== 'A') {
@@ -90,18 +77,8 @@ INTERCEPT_LINKS_JS = '''
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                
-                // 判断是否为下载链接
-                if (isDownloadUrl(href)) {
-                    var filename = href.split('/').pop().split('?')[0] || 'download';
-                    showDownloadNotify(filename, '📥 正在下载...');
-                    if (window.pywebview && window.pywebview.api) {
-                        pywebview.api.download_file(href);
-                    }
-                } else {
-                    // 普通链接：在当前窗口打开
-                    target.target = '_self';
-                    window.location.href = href;
+                if (window.pywebview && window.pywebview.api) {
+                    pywebview.api.handle_link(href);
                 }
                 return false;
             }
@@ -109,17 +86,24 @@ INTERCEPT_LINKS_JS = '''
     }, true);
     
     // ===== 拦截window.open =====
+    var _origOpen = window.open;
     window.open = function(url, target, features) {
-        if (isDownloadUrl(url)) {
-            var filename = url.split('/').pop().split('?')[0] || 'download';
-            showDownloadNotify(filename, '📥 正在下载...');
+        if (url && !url.startsWith('javascript:') && !url.startsWith('#')) {
             if (window.pywebview && window.pywebview.api) {
-                pywebview.api.download_file(url);
+                pywebview.api.handle_link(url);
             }
-            return null;
         }
-        window.location.href = url;
         return null;
+    };
+    
+    // ===== 拦截导航：通过history API监控 =====
+    var _origPush = history.pushState;
+    var _origReplace = history.replaceState;
+    history.pushState = function(state, title, url) {
+        if (url && window.pywebview && window.pywebview.api) {
+            // 不拦截pushState，正常导航
+        }
+        return _origPush.apply(this, arguments);
     };
     
     // ===== 拦截表单提交 =====
@@ -130,7 +114,7 @@ INTERCEPT_LINKS_JS = '''
         }
     }, true);
     
-    // ===== 拦截右键"在新窗口打开" =====
+    // ===== 拦截右键菜单 =====
     document.addEventListener('contextmenu', function(e) {
         var target = e.target;
         while (target && target.tagName !== 'A') {
@@ -163,7 +147,8 @@ INTERCEPT_LINKS_JS = '''
     document.querySelectorAll('a').forEach(function(link) {
         link.target = '_self';
     });
-})();'''
+})();
+'''
 
 # ===== 设置页面HTML =====
 SETTINGS_HTML = '''<!DOCTYPE html>
@@ -210,7 +195,6 @@ var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
 
-// 等待API准备好再加载配置
 function loadConfig() {
     if (window.pywebview && window.pywebview.api) {
         pywebview.api.get_config().then(function(c) {
@@ -219,7 +203,6 @@ function loadConfig() {
             fullscreenCheck.checked = c.fullscreen !== false;
             urlInput.focus();
         }).catch(function(err) {
-            console.log('加载配置失败，重试...');
             setTimeout(loadConfig, 100);
         });
     } else {
@@ -227,9 +210,7 @@ function loadConfig() {
     }
 }
 
-// 监听pywebview ready事件
 window.addEventListener('pywebviewready', loadConfig);
-// 备用：延迟加载
 setTimeout(loadConfig, 300);
 
 function saveAndReload() {
@@ -246,29 +227,106 @@ titleInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 
 # ===== 全局变量 =====
 browse_window = None
-current_fullscreen = True  # 记录当前全屏状态
+current_fullscreen = True
+
+# ===== 判断URL是否为文件下载 =====
+DOWNLOAD_EXTS = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
+                 '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                 '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv',
+                 '.iso', '.dmg', '.deb', '.rpm', '.apk']
+
+def is_download_by_ext(url):
+    lower = url.lower().split('?')[0].split('#')[0]
+    for ext in DOWNLOAD_EXTS:
+        if lower.endswith(ext):
+            return True
+    return False
+
+def check_url_is_download(url):
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        resp = urllib.request.urlopen(req, timeout=8)
+        content_type = resp.headers.get('Content-Type', '')
+        content_disp = resp.headers.get('Content-Disposition', '')
+        
+        if 'attachment' in content_disp.lower():
+            return True
+        
+        download_types = [
+            'application/octet-stream', 'application/x-msdownload',
+            'application/x-msdos-program', 'application/zip',
+            'application/x-rar-compressed', 'application/x-7z-compressed',
+            'application/x-tar', 'application/gzip', 'application/pdf',
+            'application/msword', 'application/vnd.ms-excel',
+            'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats',
+        ]
+        for dt in download_types:
+            if dt in content_type.lower():
+                return True
+        return False
+    except:
+        return False
 
 # ===== API =====
 class BrowseApi:
     def get_config(self):
         return load_config()
     
+    def handle_link(self, href):
+        """处理所有链接点击：判断是下载还是导航"""
+        global browse_window
+        
+        # 解析相对URL
+        if not href.startswith('http://') and not href.startswith('https://'):
+            try:
+                current_url = browse_window.get_current_url() if browse_window else ''
+                if current_url:
+                    href = urllib.parse.urljoin(current_url, href)
+                else:
+                    href = 'https://' + href
+            except:
+                href = 'https://' + href
+        
+        # 快速检查：URL扩展名是下载文件
+        if is_download_by_ext(href):
+            self._do_download(href)
+            return {'action': 'download'}
+        
+        # 后台检查：HEAD请求判断是否为下载
+        def check_and_handle():
+            try:
+                if check_url_is_download(href):
+                    self._do_download(href)
+                else:
+                    if browse_window:
+                        browse_window.load_url(href)
+            except:
+                if browse_window:
+                    browse_window.load_url(href)
+        
+        t = threading.Thread(target=check_and_handle, daemon=True)
+        t.start()
+        return {'action': 'checking'}
+    
     def download_file(self, url):
-        """在WebBox内下载文件"""
-        import threading
+        self._do_download(url)
+        return {'ok': True}
+    
+    def _do_download(self, url):
+        """执行下载"""
+        import json as _json
+        
         def do_download():
             try:
                 # 解析相对URL
                 if not url.startswith('http'):
-                    # 获取当前页面URL作为base
-                    current_url = browse_window.get_current_url() if browse_window else ''
-                    if current_url:
-                        from urllib.parse import urljoin
-                        url_resolved = urljoin(current_url, url)
-                    else:
-                        url_resolved = url
-                else:
-                    url_resolved = url
+                    try:
+                        current_url = browse_window.get_current_url() if browse_window else ''
+                        if current_url:
+                            url = urllib.parse.urljoin(current_url, url)
+                    except:
+                        pass
                 
                 # 下载目录
                 if sys.platform == 'win32':
@@ -277,24 +335,60 @@ class BrowseApi:
                     download_dir = Path.home() / 'Downloads' / 'WebBox'
                 download_dir.mkdir(parents=True, exist_ok=True)
                 
-                # 获取文件名
-                filename = url_resolved.split('/')[-1].split('?')[0] or 'download'
+                # 先用HEAD获取真实文件名
+                filename = 'download'
+                try:
+                    req = urllib.request.Request(url, method='HEAD')
+                    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                    resp = urllib.request.urlopen(req, timeout=10)
+                    disp = resp.headers.get('Content-Disposition', '')
+                    if 'filename' in disp:
+                        m = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^;"\']+)["\']?', disp)
+                        if m:
+                            filename = urllib.parse.unquote(m.group(1))
+                except:
+                    pass
+                
+                if filename == 'download':
+                    filename = url.split('/')[-1].split('?')[0] or 'download'
+                
                 filepath = download_dir / filename
                 
-                # 下载
-                urllib.request.urlretrieve(url_resolved, str(filepath))
-                
-                # 通知前端
-                import json as _json
+                # 通知：正在下载
                 notify_js = 'window.__webbox_download_result({}, {})'.format(
                     _json.dumps(filename),
-                    _json.dumps('下载完成: ' + str(filepath))
+                    _json.dumps('📥 正在下载...')
                 )
-                browse_window.evaluate_js(notify_js)
+                try:
+                    browse_window.evaluate_js(notify_js)
+                except:
+                    pass
+                
+                # 下载文件
+                req = urllib.request.Request(url)
+                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                resp = urllib.request.urlopen(req, timeout=120)
+                
+                with open(str(filepath), 'wb') as f:
+                    while True:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                
+                # 通知：下载完成
+                notify_js = 'window.__webbox_download_result({}, {})'.format(
+                    _json.dumps(filename),
+                    _json.dumps('✅ 下载完成: ' + str(filepath))
+                )
+                try:
+                    browse_window.evaluate_js(notify_js)
+                except:
+                    pass
             except Exception as e:
                 notify_js = 'window.__webbox_download_result({}, {})'.format(
                     _json.dumps('download'),
-                    _json.dumps('下载失败: ' + str(e))
+                    _json.dumps('❌ 下载失败: ' + str(e))
                 )
                 try:
                     browse_window.evaluate_js(notify_js)
@@ -303,7 +397,6 @@ class BrowseApi:
         
         t = threading.Thread(target=do_download, daemon=True)
         t.start()
-        return {'ok': True}
     
     def save_and_reload(self, url, title, fullscreen):
         global browse_window, current_fullscreen
@@ -320,7 +413,6 @@ class BrowseApi:
         save_config(config)
         if browse_window:
             browse_window.load_url(url)
-            # 实时切换全屏模式
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
@@ -356,22 +448,19 @@ def start_hotkey_listener():
     except Exception as e:
         print(f"快捷键监听失败: {e}")
 
-# ===== 获取屏幕工作区尺寸（去掉任务栏）=====
+# ===== 获取屏幕工作区尺寸 =====
 def get_screen_size():
     try:
         import ctypes
-        # 使用Windows API获取工作区尺寸
         class RECT(ctypes.Structure):
             _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
                        ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
         rect = RECT()
-        # SPI_GETWORKAREA = 48
         ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)
         width = rect.right - rect.left
         height = rect.bottom - rect.top
         return width, height
     except:
-        # 非Windows系统或失败，返回默认值
         return 1920, 1040
 
 # ===== 主程序 =====
@@ -379,9 +468,8 @@ def main():
     global current_fullscreen
     config = load_config()
     screen_width, screen_height = get_screen_size()
-    current_fullscreen = config.get('fullscreen', True)  # 初始化全屏状态
+    current_fullscreen = config.get('fullscreen', True)
     
-    # 启动全局快捷键监听
     hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
     hotkey_thread.start()
     
@@ -390,18 +478,13 @@ def main():
         global browse_window
         fullscreen = config.get('fullscreen', True)
         
-        # 窗口参数
         window_args = {
             'title': config.get('title', 'WebBox'),
             'url': config['url'],
             'js_api': api
         }
         
-        if fullscreen:
-            # 全屏模式：创建后再切换
-            pass
-        else:
-            # 非全屏模式：最大化窗口，定位到(0,0)
+        if not fullscreen:
             window_args['width'] = screen_width
             window_args['height'] = screen_height
             window_args['x'] = 0
@@ -409,10 +492,8 @@ def main():
         
         browse_window = webview.create_window(**window_args)
         
-        # 页面加载完成后注入拦截脚本并设置全屏
         def on_loaded():
             try:
-                # 注入允许选择的CSS
                 browse_window.evaluate_js('''
                     (function() {
                         var style = document.createElement('style');
@@ -421,19 +502,14 @@ def main():
                     })();
                 ''')
                 browse_window.evaluate_js(INTERCEPT_LINKS_JS)
-                # 在窗口显示后切换全屏模式
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:
-                    # 非全屏模式：使用Windows API最大化窗口
                     try:
                         import ctypes
-                        import time
-                        time.sleep(0.1)  # 等窗口完全显示
-                        # 查找窗口
+                        time.sleep(0.1)
                         hwnd = ctypes.windll.user32.FindWindowW(None, config.get('title', 'WebBox'))
                         if hwnd:
-                            # SW_MAXIMIZE = 3
                             ctypes.windll.user32.ShowWindow(hwnd, 3)
                     except:
                         pass
