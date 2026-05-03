@@ -36,8 +36,8 @@ def save_config(data):
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ===== 拦截外链的JS代码 =====
-INTERCEPT_LINKS_JS = '''
+# ===== JS代码：不拦截链接点击，让浏览器原生处理 =====
+JS_CODE = '''
 (function() {
     // ===== 显示通知 =====
     function showNotify(filename, status) {
@@ -66,32 +66,10 @@ INTERCEPT_LINKS_JS = '''
         }, 5000);
     };
     
-    // ===== 点击拦截：链接交给Python =====
-    document.addEventListener('click', function(e) {
-        var target = e.target;
-        while (target && target.tagName !== 'A') {
-            target = target.parentElement;
-        }
-        if (target && target.tagName === 'A') {
-            var href = target.getAttribute('href');
-            if (href && !href.startsWith('javascript:') && !href.startsWith('#') && !href.startsWith('mailto:')) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                if (window.pywebview && window.pywebview.api) {
-                    pywebview.api.handle_link(href);
-                }
-                return false;
-            }
-        }
-    }, true);
-    
-    // ===== 拦截window.open =====
+    // ===== 拦截window.open：改为同窗口导航 =====
     window.open = function(url, target, features) {
         if (url && !url.startsWith('javascript:') && !url.startsWith('#')) {
-            if (window.pywebview && window.pywebview.api) {
-                pywebview.api.handle_link(url);
-            }
+            window.location.href = url;
         }
         return null;
     };
@@ -104,7 +82,7 @@ INTERCEPT_LINKS_JS = '''
         }
     }, true);
     
-    // ===== 拦截右键 =====
+    // ===== 拦截右键：链接在当前窗口打开 =====
     document.addEventListener('contextmenu', function(e) {
         var target = e.target;
         while (target && target.tagName !== 'A') {
@@ -115,7 +93,7 @@ INTERCEPT_LINKS_JS = '''
         }
     }, true);
     
-    // ===== 动态监控DOM =====
+    // ===== 动态监控DOM：链接在当前窗口打开 =====
     var observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             mutation.addedNodes.forEach(function(node) {
@@ -227,19 +205,6 @@ def get_download_dir():
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-# ===== 判断URL是否为文件下载 =====
-DOWNLOAD_EXTS = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
-                 '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-                 '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv',
-                 '.iso', '.dmg', '.deb', '.rpm', '.apk']
-
-def is_download_by_ext(url):
-    lower = url.lower().split('?')[0].split('#')[0]
-    for ext in DOWNLOAD_EXTS:
-        if lower.endswith(ext):
-            return True
-    return False
-
 # ===== Hook浏览器下载：不弹对话框，直接下载到WebBox目录 =====
 def patch_download_handler():
     """Hook pywebview的DownloadStarting事件，不弹保存对话框，直接下载到指定目录"""
@@ -324,9 +289,7 @@ class BrowseApi:
         return load_config()
     
     def handle_link(self, href):
-        """处理链接点击"""
-        global browse_window
-        
+        """处理window.open拦截（简化版，链接点击不再走这里）"""
         # 解析相对URL
         if not href.startswith('http://') and not href.startswith('https://'):
             try:
@@ -338,9 +301,9 @@ class BrowseApi:
             except:
                 href = 'https://' + href
         
-        # 所有链接都正常导航，下载的会被DownloadStarting拦截
+        # window.location.href 同窗口导航
         if browse_window:
-            browse_window.load_url(href)
+            browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
     
     def save_and_reload(self, url, title, fullscreen):
@@ -414,8 +377,11 @@ def main():
     
     # Hook下载：不弹对话框，自动下载到WebBox目录
     patch_download_handler()
+    
     # 允许下载（让DownloadStarting事件走我们的Hook）
     webview.settings['ALLOW_DOWNLOADS'] = True
+    # 外链在当前窗口打开（不打开系统浏览器）
+    webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
     
     config = load_config()
     screen_width, screen_height = get_screen_size()
@@ -451,7 +417,7 @@ def main():
                         document.head.appendChild(style);
                     })();
                 ''')
-                browse_window.evaluate_js(INTERCEPT_LINKS_JS)
+                browse_window.evaluate_js(JS_CODE)
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:
