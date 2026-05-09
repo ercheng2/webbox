@@ -18,7 +18,7 @@ def get_config_path():
 
 def load_config():
     config_file = get_config_path()
-    default = {'url': '', 'title': 'WebBox', 'fullscreen': True}
+    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': ''}
     if config_file.exists():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -154,13 +154,18 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <input type="checkbox" id="fullscreenCheck" checked>
         <label for="fullscreenCheck">全屏模式</label>
     </div>
-    <div class="hint">💡 按 F1 可随时打开此设置窗口</div>
+    <div class="field">
+        <label>下载保存路径（留空则默认 Downloads/WebBox）</label>
+        <input type="text" id="downloadDirInput" placeholder="如 D:\\Downloads 或留空">
+    </div>
+    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
 </div>
 <script>
 var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
+var downloadDirInput = document.getElementById('downloadDirInput');
 
 function loadConfig() {
     if (window.pywebview && window.pywebview.api) {
@@ -168,6 +173,7 @@ function loadConfig() {
             if (c.url) urlInput.value = c.url;
             if (c.title) titleInput.value = c.title;
             fullscreenCheck.checked = c.fullscreen !== false;
+            if (c.download_dir) downloadDirInput.value = c.download_dir;
             urlInput.focus();
         }).catch(function(err) {
             setTimeout(loadConfig, 100);
@@ -183,11 +189,12 @@ setTimeout(loadConfig, 300);
 function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
-    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked);
+    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim());
 }
 
 urlInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 titleInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
+downloadDirInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 </script>
 </body>
 </html>'''
@@ -198,7 +205,11 @@ current_fullscreen = True
 
 # ===== 下载目录 =====
 def get_download_dir():
-    if sys.platform == 'win32':
+    config = load_config()
+    custom_dir = config.get('download_dir', '').strip()
+    if custom_dir:
+        d = Path(custom_dir)
+    elif sys.platform == 'win32':
         d = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
     else:
         d = Path.home() / 'Downloads' / 'WebBox'
@@ -306,7 +317,7 @@ class BrowseApi:
             browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
     
-    def save_and_reload(self, url, title, fullscreen):
+    def save_and_reload(self, url, title, fullscreen, download_dir=''):
         global browse_window, current_fullscreen
         url = url.strip()
         if not url:
@@ -316,7 +327,8 @@ class BrowseApi:
         config = {
             'url': url, 
             'title': title.strip() or 'WebBox',
-            'fullscreen': fullscreen
+            'fullscreen': fullscreen,
+            'download_dir': download_dir.strip()
         }
         save_config(config)
         if browse_window:
@@ -330,7 +342,7 @@ class SettingsApi:
     def get_config(self):
         return load_config()
     
-    def save_and_reload(self, url, title, fullscreen):
+    def save_and_reload(self, url, title, fullscreen, download_dir=''):
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -339,7 +351,8 @@ class SettingsApi:
         config = {
             'url': url, 
             'title': title.strip() or 'WebBox',
-            'fullscreen': fullscreen
+            'fullscreen': fullscreen,
+            'download_dir': download_dir.strip()
         }
         save_config(config)
         return {'ok': True}
