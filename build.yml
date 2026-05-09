@@ -1,0 +1,32 @@
+name: Build WebBox
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    - name: Install
+      run: pip install pywebview pyinstaller keyboard
+    - name: Build
+      run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico main.py
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v3.16-${{ github.run_number }}
+        name: "WebBox v3.16 - F5刷新功能"
+        body: |
+          更新内容：
+          - 添加F5刷新网页功能
+          - F1=打开设置窗口
+          - F5=刷新当前页面
+        files: dist/WebBox.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
