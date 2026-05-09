@@ -260,58 +260,58 @@ def get_download_dir():
         d.mkdir(parents=True, exist_ok=True)
     return d
 
-# ===== Hook浏览器下载：不弹对话框，直接下载到WebBox目录 =====
+# ===== Hook浏览器下载：不弹对话框，直接下载到指定目录 =====
 def patch_download_handler():
     """Hook pywebview的DownloadStarting事件，不弹保存对话框，直接下载到指定目录"""
     try:
         from webview.platforms import edgechromium
         
+        # 兼容不同版本的pywebview类名
+        BrowserClass = getattr(edgechromium, 'EdgeChrome', None) or getattr(edgechromium, 'Browser', None)
+        if not BrowserClass:
+            print("[WebBox] 找不到浏览器类，下载Hook失败")
+            return
+        
+        original_on_download = getattr(BrowserClass, 'on_download_starting', None)
+        
         def custom_on_download(self, sender, args):
-            # 不取消下载！让浏览器正常下载
-            # 但把保存路径改到 Downloads/WebBox/，不弹对话框
             download_dir = get_download_dir()
             original_filename = os.path.basename(args.ResultFilePath)
             save_path = str(download_dir / original_filename)
             
-            # 设置下载路径
+            # 设置下载路径并抑制默认对话框
             args.ResultFilePath = save_path
+            try:
+                args.Handled = True
+            except:
+                pass
             
-            # 通知页面：开始下载
+            print(f"[WebBox] 下载拦截: {original_filename} → {save_path}")
+            
             filename = original_filename
             def notify_start():
                 try:
-                    import json as _json
                     browse_window.evaluate_js('window.__webbox_download_start({})'.format(
-                        _json.dumps(filename)
+                        json.dumps(filename)
                     ))
                 except:
                     pass
             
             def notify_done():
                 try:
-                    import json as _json
                     browse_window.evaluate_js('window.__webbox_download_done({}, {})'.format(
-                        _json.dumps(filename),
-                        _json.dumps(save_path)
+                        json.dumps(filename),
+                        json.dumps(save_path)
                     ))
                 except:
                     pass
-                # 下载完成后回到上一页
-                try:
-                    time.sleep(1)
-                    browse_window.evaluate_js('window.history.back();')
-                except:
-                    pass
             
-            # 通知开始下载
             threading.Thread(target=notify_start, daemon=True).start()
             
-            # 监控下载完成：等文件出现且不再增长
             def wait_for_download():
                 filepath = save_path
                 last_size = 0
                 same_count = 0
-                # 最多等5分钟
                 for i in range(300):
                     time.sleep(1)
                     try:
@@ -320,7 +320,6 @@ def patch_download_handler():
                             if current_size == last_size and current_size > 0:
                                 same_count += 1
                                 if same_count >= 3:
-                                    # 文件大小3秒没变，认为下载完成
                                     notify_done()
                                     return
                             else:
@@ -328,13 +327,12 @@ def patch_download_handler():
                                 last_size = current_size
                     except:
                         pass
-                # 超时也通知
                 notify_done()
             
             threading.Thread(target=wait_for_download, daemon=True).start()
         
-        edgechromium.Browser.on_download_starting = custom_on_download
-        print("[WebBox] 已Hook下载处理器：自动下载到WebBox目录")
+        BrowserClass.on_download_starting = custom_on_download
+        print(f"[WebBox] 已Hook下载处理器({BrowserClass.__name__})：自动下载到指定目录")
     except Exception as e:
         print(f"[WebBox] Hook下载处理器失败: {e}")
 
