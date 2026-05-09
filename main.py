@@ -40,7 +40,7 @@ def save_config(data):
 JS_CODE = '''
 (function() {
     // ===== 显示通知 =====
-    function showNotify(filename, status) {
+    function showNotify(filename, status, filepath) {
         var box = document.getElementById('__webbox_notify');
         if (!box) {
             box = document.createElement('div');
@@ -48,22 +48,35 @@ JS_CODE = '''
             box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;pointer-events:auto;';
             document.body.appendChild(box);
         }
-        box.innerHTML = '<div style="background:rgba(30,30,40,0.95);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4);margin-bottom:8px">' +
+        var clickAction = '';
+        var cursorStyle = '';
+        if (filepath) {
+            clickAction = ' onclick="window.__webbox_open_folder()" style="cursor:pointer"';
+        }
+        box.innerHTML = '<div style="background:rgba(30,30,40,0.95);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4);margin-bottom:8px"' + clickAction + '>' +
             '<div style="font-weight:600;margin-bottom:4px">' + status + '</div>' +
             '<div style="color:#aaa;font-size:12px;word-break:break-all">' + filename + '</div>' +
+            (filepath ? '<div style="color:#6ca0dc;font-size:11px;margin-top:6px">📂 点击打开文件夹</div>' : '') +
             '</div>';
     }
+    
+    // ===== 打开文件夹 =====
+    window.__webbox_open_folder = function() {
+        if (window.pywebview && window.pywebview.api) {
+            pywebview.api.open_download_folder();
+        }
+    };
     
     // ===== Python回调：下载状态 =====
     window.__webbox_download_start = function(filename) {
         showNotify(filename, '📥 正在下载...');
     };
     window.__webbox_download_done = function(filename, filepath) {
-        showNotify(filename, '✅ 下载完成');
+        showNotify(filename, '✅ 下载完成', filepath);
         setTimeout(function() {
             var box = document.getElementById('__webbox_notify');
             if (box) box.innerHTML = '';
-        }, 5000);
+        }, 8000);
     };
     
     // ===== 拦截window.open：改为同窗口导航 =====
@@ -347,6 +360,15 @@ class BrowseApi:
                 browse_window.evaluate_js('location.reload()')
             except:
                 pass
+        return {'ok': True}
+    
+    def open_download_folder(self):
+        """打开下载文件夹"""
+        try:
+            download_dir = str(get_download_dir())
+            os.startfile(download_dir)
+        except Exception as e:
+            print(f"[WebBox] 打开文件夹失败: {e}")
         return {'ok': True}
     
     def download_file(self, url):
