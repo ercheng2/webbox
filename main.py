@@ -114,6 +114,15 @@ JS_CODE = '''
     document.querySelectorAll('a').forEach(function(link) {
         link.target = '_self';
     });
+    
+    // ===== F5刷新拦截 =====
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'F5' || e.keyCode === 116) {
+            e.preventDefault();
+            e.stopPropagation();
+            location.reload();
+        }
+    }, true);
 })();
 '''
 
@@ -195,6 +204,12 @@ function saveAndReload() {
 urlInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 titleInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
 downloadDirInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
+window.addEventListener('keydown', function(e) {
+    if (e.key === 'F5' || e.keyCode === 116) {
+        e.preventDefault();
+        pywebview.api.reload_page();
+    }
+});
 </script>
 </body>
 </html>'''
@@ -209,11 +224,20 @@ def get_download_dir():
     custom_dir = config.get('download_dir', '').strip()
     if custom_dir:
         d = Path(custom_dir)
+        print(f"[WebBox] 使用自定义下载路径: {d}")
     elif sys.platform == 'win32':
         d = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
     else:
         d = Path.home() / 'Downloads' / 'WebBox'
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"[WebBox] 创建下载目录失败: {e}，使用默认路径")
+        if sys.platform == 'win32':
+            d = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
+        else:
+            d = Path.home() / 'Downloads' / 'WebBox'
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 # ===== Hook浏览器下载：不弹对话框，直接下载到WebBox目录 =====
@@ -298,6 +322,14 @@ def patch_download_handler():
 class BrowseApi:
     def get_config(self):
         return load_config()
+    
+    def reload_page(self):
+        if browse_window:
+            try:
+                browse_window.evaluate_js('location.reload()')
+            except:
+                pass
+        return {'ok': True}
     
     def handle_link(self, href):
         """处理window.open拦截（简化版，链接点击不再走这里）"""
