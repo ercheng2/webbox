@@ -82,6 +82,26 @@ JS_CODE = '''
         }
     }, true);
     
+    // ===== 拦截下载链接：交给Python端下载 =====
+    document.addEventListener('click', function(e) {
+        var target = e.target;
+        while (target && target.tagName !== 'A') {
+            target = target.parentElement;
+        }
+        if (target && target.tagName === 'A' && target.href) {
+            var href = target.href;
+            var ext = href.split('?')[0].split('#')[0].split('.').pop().toLowerCase();
+            var downloadExts = ['exe','zip','rar','7z','gz','tar','pdf','doc','docx','xls','xlsx','ppt','pptx','mp3','mp4','avi','mkv','wav','flac','iso','dmg','msi','apk','deb','rpm'];
+            if (downloadExts.indexOf(ext) !== -1) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.pywebview && window.pywebview.api) {
+                    pywebview.api.download_file(href);
+                }
+            }
+        }
+    }, true);
+    
     // ===== 拦截右键：链接在当前窗口打开 =====
     document.addEventListener('contextmenu', function(e) {
         var target = e.target;
@@ -329,6 +349,45 @@ class BrowseApi:
                 browse_window.evaluate_js('location.reload()')
             except:
                 pass
+        return {'ok': True}
+    
+    def download_file(self, url):
+        """Python端下载文件到指定目录"""
+        def _download():
+            try:
+                import urllib.request
+                download_dir = get_download_dir()
+                filename = url.split('?')[0].split('#')[0].split('/')[-1]
+                if not filename or '.' not in filename:
+                    filename = 'download'
+                save_path = download_dir / filename
+                # 避免重名
+                counter = 1
+                while save_path.exists():
+                    name, ext = os.path.splitext(filename)
+                    save_path = download_dir / f"{name}_{counter}{ext}"
+                    counter += 1
+                # 通知开始下载
+                browse_window.evaluate_js('window.__webbox_download_start({})'.format(
+                    json.dumps(filename)
+                ))
+                # 下载
+                urllib.request.urlretrieve(url, str(save_path))
+                # 通知下载完成
+                browse_window.evaluate_js('window.__webbox_download_done({}, {})'.format(
+                    json.dumps(filename),
+                    json.dumps(str(save_path))
+                ))
+                print(f"[WebBox] 下载完成: {save_path}")
+            except Exception as e:
+                print(f"[WebBox] 下载失败: {e}")
+                try:
+                    browse_window.evaluate_js('window.__webbox_download_start({})'.format(
+                        json.dumps(f"下载失败: {str(e)}")
+                    ))
+                except:
+                    pass
+        threading.Thread(target=_download, daemon=True).start()
         return {'ok': True}
     
     def handle_link(self, href):
