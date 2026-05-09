@@ -356,10 +356,8 @@ def start_hotkey_listener():
         def reload_page():
             if browse_window:
                 try:
-                    current_url = browse_window.get_current_url()
-                    if current_url:
-                        browse_window.load_url(current_url)
-                        print(f"[WebBox] 已刷新: {current_url}")
+                    browse_window.evaluate_js('location.reload()')
+                    print("[WebBox] 已刷新页面")
                 except Exception as e:
                     print(f"[WebBox] 刷新失败: {e}")
         
