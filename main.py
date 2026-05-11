@@ -544,21 +544,22 @@ def main():
         import shutil
         if sys.platform == 'win32':
             marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
-            local_app = os.environ.get('LOCALAPPDATA', '')
+            app_data = os.environ.get('APPDATA', '')
         else:
             marker_dir = Path.home() / '.webbox'
-            local_app = ''
+            app_data = ''
         marker_file = marker_dir / '.clear_data'
         if marker_file.exists():
             print("[WebBox] 检测到清除标记，正在清除浏览数据...")
             marker_file.unlink(missing_ok=True)
             # 删除pywebview缓存目录（WebView2用户数据）
-            if local_app:
-                pywebview_cache = Path(local_app) / 'pywebview'
+            # pywebview使用 %APPDATA%\pywebview 作为UserDataFolder
+            if app_data:
+                pywebview_cache = Path(app_data) / 'pywebview'
                 if pywebview_cache.exists():
                     shutil.rmtree(pywebview_cache, ignore_errors=True)
                     print(f"[WebBox] 已清除: {pywebview_cache}")
-            print("[WebBox] 浏览数据已清除")
+            print("[WebBox] 浏览数据已清除，请重新打开软件")
     except Exception as e:
         print(f"[WebBox] 清除浏览数据失败: {e}")
     
