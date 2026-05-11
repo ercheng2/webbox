@@ -238,9 +238,16 @@ function saveAndReload() {
 }
 
 function clearBrowsingData() {
-    if (confirm('确定要清除所有浏览记录吗？\n包括：自动填充的用户名、密码、缓存等')) {
-        pywebview.api.clear_browsing_data();
-    }
+    pywebview.api.clear_browsing_data();
+    var btn = document.querySelector('.btn-clear');
+    btn.textContent = '✅ 已清除';
+    btn.style.borderColor = '#27ae60';
+    btn.style.color = '#27ae60';
+    setTimeout(function() {
+        btn.textContent = '🗑 清除浏览记录（用户名、密码、缓存）';
+        btn.style.borderColor = '#e74c3c';
+        btn.style.color = '#e74c3c';
+    }, 3000);
 }
 
 urlInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
