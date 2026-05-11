@@ -179,6 +179,8 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
 .hint { margin: 24px 0; padding: 14px 16px; background: #f8f9fa; border-radius: 10px; font-size: 14px; color: #666; }
 .btn { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
 .btn:hover { box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+.btn-clear { width: 100%; padding: 12px; border: 2px solid #e74c3c; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; background: white; color: #e74c3c; margin-top: 12px; }
+.btn-clear:hover { background: #e74c3c; color: white; }
 </style>
 </head>
 <body>
@@ -202,6 +204,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
     </div>
     <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
+    <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
 </div>
 <script>
 var urlInput = document.getElementById('urlInput');
@@ -232,6 +235,12 @@ function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
     pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim());
+}
+
+function clearBrowsingData() {
+    if (confirm('确定要清除所有浏览记录吗？\n包括：自动填充的用户名、密码、缓存等')) {
+        pywebview.api.clear_browsing_data();
+    }
 }
 
 urlInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
@@ -369,6 +378,45 @@ class BrowseApi:
             os.startfile(download_dir)
         except Exception as e:
             print(f"[WebBox] 打开文件夹失败: {e}")
+        return {'ok': True}
+    
+    def clear_browsing_data(self):
+        """清除浏览记录：自动填充、密码、缓存等"""
+        try:
+            # 通过JS清除当前页面的表单数据
+            if browse_window:
+                # 清除localStorage和sessionStorage
+                browse_window.evaluate_js('localStorage.clear(); sessionStorage.clear();')
+            # 删除pywebview的缓存目录
+            import shutil
+            if sys.platform == 'win32':
+                local_app = os.environ.get('LOCALAPPDATA', '')
+                cache_dirs = [
+                    Path(os.environ.get('APPDATA', '.')) / 'WebBox',
+                ]
+                if local_app:
+                    cache_dirs.append(Path(local_app) / 'pywebview')
+            else:
+                cache_dirs = [Path.home() / '.webbox']
+            
+            for cd in cache_dirs:
+                if cd.exists():
+                    # 只删缓存子目录，不删配置
+                    for sub in ['cache', 'Cache', 'GPUCache', 'Code Cache', 'Service Worker']:
+                        sub_path = cd / sub
+                        if sub_path.exists():
+                            shutil.rmtree(sub_path, ignore_errors=True)
+                    # 删除WebView2用户数据中的自动填充数据
+                    for item in cd.iterdir():
+                        if item.is_dir() and item.name not in ['config.json']:
+                            # 删除除了配置外的所有目录
+                            if item.name != 'WebBox' and not item.name.endswith('.json'):
+                                shutil.rmtree(item, ignore_errors=True)
+            print("[WebBox] 已清除浏览数据")
+            if browse_window:
+                browse_window.evaluate_js('location.reload()')
+        except Exception as e:
+            print(f"[WebBox] 清除浏览数据失败: {e}")
         return {'ok': True}
     
     def download_file(self, url):
