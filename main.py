@@ -238,16 +238,12 @@ function saveAndReload() {
 }
 
 function clearBrowsingData() {
-    pywebview.api.clear_browsing_data();
-    var btn = document.querySelector('.btn-clear');
-    btn.textContent = '✅ 已清除';
-    btn.style.borderColor = '#27ae60';
-    btn.style.color = '#27ae60';
-    setTimeout(function() {
-        btn.textContent = '🗑 清除浏览记录（用户名、密码、缓存）';
-        btn.style.borderColor = '#e74c3c';
-        btn.style.color = '#e74c3c';
-    }, 3000);
+    pywebview.api.clear_browsing_data().then(function(result) {
+        var btn = document.querySelector('.btn-clear');
+        btn.textContent = '✅ 已标记清除，关闭软件后重新打开即可生效';
+        btn.style.borderColor = '#27ae60';
+        btn.style.color = '#27ae60';
+    });
 }
 
 urlInput.onkeydown = function(e) { if (e.key === 'Enter') saveAndReload(); };
@@ -388,43 +384,20 @@ class BrowseApi:
         return {'ok': True}
     
     def clear_browsing_data(self):
-        """清除浏览记录：自动填充、密码、缓存等"""
+        """清除浏览记录：标记清除标记，下次启动时删除WebView2数据"""
         try:
-            # 通过JS清除当前页面的表单数据
-            if browse_window:
-                # 清除localStorage和sessionStorage
-                browse_window.evaluate_js('localStorage.clear(); sessionStorage.clear();')
-            # 删除pywebview的缓存目录
-            import shutil
+            # 写一个清除标记文件
             if sys.platform == 'win32':
-                local_app = os.environ.get('LOCALAPPDATA', '')
-                cache_dirs = [
-                    Path(os.environ.get('APPDATA', '.')) / 'WebBox',
-                ]
-                if local_app:
-                    cache_dirs.append(Path(local_app) / 'pywebview')
+                marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
             else:
-                cache_dirs = [Path.home() / '.webbox']
-            
-            for cd in cache_dirs:
-                if cd.exists():
-                    # 只删缓存子目录，不删配置
-                    for sub in ['cache', 'Cache', 'GPUCache', 'Code Cache', 'Service Worker']:
-                        sub_path = cd / sub
-                        if sub_path.exists():
-                            shutil.rmtree(sub_path, ignore_errors=True)
-                    # 删除WebView2用户数据中的自动填充数据
-                    for item in cd.iterdir():
-                        if item.is_dir() and item.name not in ['config.json']:
-                            # 删除除了配置外的所有目录
-                            if item.name != 'WebBox' and not item.name.endswith('.json'):
-                                shutil.rmtree(item, ignore_errors=True)
-            print("[WebBox] 已清除浏览数据")
-            if browse_window:
-                browse_window.evaluate_js('location.reload()')
+                marker_dir = Path.home() / '.webbox'
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            marker_file = marker_dir / '.clear_data'
+            marker_file.write_text('1', encoding='utf-8')
+            print("[WebBox] 已标记清除，重启后生效")
         except Exception as e:
-            print(f"[WebBox] 清除浏览数据失败: {e}")
-        return {'ok': True}
+            print(f"[WebBox] 标记清除失败: {e}")
+        return {'ok': True, 'need_restart': True}
     
     def download_file(self, url):
         """Python端下载文件到指定目录"""
@@ -565,6 +538,29 @@ def get_screen_size():
 # ===== 主程序 =====
 def main():
     global current_fullscreen, browse_window
+    
+    # 检查是否需要清除浏览数据（上次标记的）
+    try:
+        import shutil
+        if sys.platform == 'win32':
+            marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
+            local_app = os.environ.get('LOCALAPPDATA', '')
+        else:
+            marker_dir = Path.home() / '.webbox'
+            local_app = ''
+        marker_file = marker_dir / '.clear_data'
+        if marker_file.exists():
+            print("[WebBox] 检测到清除标记，正在清除浏览数据...")
+            marker_file.unlink(missing_ok=True)
+            # 删除pywebview缓存目录（WebView2用户数据）
+            if local_app:
+                pywebview_cache = Path(local_app) / 'pywebview'
+                if pywebview_cache.exists():
+                    shutil.rmtree(pywebview_cache, ignore_errors=True)
+                    print(f"[WebBox] 已清除: {pywebview_cache}")
+            print("[WebBox] 浏览数据已清除")
+    except Exception as e:
+        print(f"[WebBox] 清除浏览数据失败: {e}")
     
     # Hook下载：不弹对话框，自动下载到WebBox目录
     patch_download_handler()
