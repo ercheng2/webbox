@@ -8,7 +8,13 @@ import time
 from pathlib import Path
 
 # ===== 配置管理 =====
+_custom_config_path = None  # 通过 --config 参数指定的配置文件路径
+
 def get_config_path():
+    if _custom_config_path:
+        p = Path(_custom_config_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
     if sys.platform == 'win32':
         config_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
     else:
@@ -18,7 +24,7 @@ def get_config_path():
 
 def load_config():
     config_file = get_config_path()
-    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': ''}
+    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': '', 'config_file': str(get_config_path())}
     if config_file.exists():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -31,8 +37,15 @@ def load_config():
             pass
     return default
 
-def save_config(data):
-    config_file = get_config_path()
+def save_config(data, target_path=None):
+    """保存配置，target_path 可指定另存为的路径"""
+    if target_path:
+        config_file = Path(target_path)
+    else:
+        config_file = get_config_path()
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    # 记录当前配置文件路径
+    data['config_file'] = str(config_file)
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -202,7 +215,11 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <label>下载保存路径（留空则默认 Downloads/WebBox）</label>
         <input type="text" id="downloadDirInput" placeholder="如 D:\\Downloads 或留空">
     </div>
-    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面</div>
+    <div class="field">
+        <label>配置文件路径（留空则用默认路径，不同路径可开不同网页）</label>
+        <input type="text" id="configFileInput" placeholder="如 D:\\WebBox\\site1.json 或留空">
+    </div>
+    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 指定不同的配置文件路径，可以同时打开多个 WebBox 显示不同网页</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
     <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
 </div>
@@ -219,6 +236,8 @@ function loadConfig() {
             if (c.title) titleInput.value = c.title;
             fullscreenCheck.checked = c.fullscreen !== false;
             if (c.download_dir) downloadDirInput.value = c.download_dir;
+            var configFileInput = document.getElementById('configFileInput');
+            if (c.config_file) configFileInput.value = c.config_file;
             urlInput.focus();
         }).catch(function(err) {
             setTimeout(loadConfig, 100);
@@ -234,7 +253,8 @@ setTimeout(loadConfig, 300);
 function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
-    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim());
+    var configFileInput = document.getElementById('configFileInput');
+    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim(), configFileInput.value.trim());
 }
 
 function clearBrowsingData() {
@@ -456,7 +476,7 @@ class BrowseApi:
             browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
     
-    def save_and_reload(self, url, title, fullscreen, download_dir=''):
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file=''):
         global browse_window, current_fullscreen
         url = url.strip()
         if not url:
@@ -467,9 +487,9 @@ class BrowseApi:
             'url': url, 
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
-            'download_dir': download_dir.strip()
+            'download_dir': download_dir.strip(),
         }
-        save_config(config)
+        save_config(config, target_path=config_file.strip() or None)
         if browse_window:
             browse_window.load_url(url)
             if fullscreen != current_fullscreen:
@@ -481,7 +501,7 @@ class SettingsApi:
     def get_config(self):
         return load_config()
     
-    def save_and_reload(self, url, title, fullscreen, download_dir=''):
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file=''):
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -491,9 +511,9 @@ class SettingsApi:
             'url': url, 
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
-            'download_dir': download_dir.strip()
+            'download_dir': download_dir.strip(),
         }
-        save_config(config)
+        save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
 
 # ===== 全局快捷键监听 =====
@@ -537,7 +557,18 @@ def get_screen_size():
 
 # ===== 主程序 =====
 def main():
-    global current_fullscreen, browse_window
+    global current_fullscreen, browse_window, _custom_config_path
+    
+    # 解析 --config 命令行参数
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == '--config' and i + 1 < len(args):
+            _custom_config_path = args[i + 1]
+            print(f"[WebBox] 使用自定义配置文件: {_custom_config_path}")
+            i += 2
+        else:
+            i += 1
     
     # 检查是否需要清除浏览数据（上次标记的）
     try:

@@ -16,17 +16,18 @@ jobs:
     - name: Install
       run: pip install pywebview pyinstaller keyboard
     - name: Build
-      run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico main.py
+      run: pyinstaller --onefile --noconsole --name WebBox --icon Kunzhancheng.ico --noupx main.py
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v3.16-${{ github.run_number }}
-        name: "WebBox v3.16 - F5刷新功能"
+        tag_name: v3.17-${{ github.run_number }}
+        name: "WebBox v3.17 - 多实例独立配置"
         body: |
           更新内容：
-          - 添加F5刷新网页功能
-          - F1=打开设置窗口
-          - F5=刷新当前页面
+          - 新增配置文件路径设置，支持多实例打开不同网页
+          - F1设置窗口可指定配置文件保存位置
+          - 支持 --config 命令行参数指定配置文件
+          - F1=打开设置窗口 | F5=刷新当前页面
         files: dist/WebBox.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
