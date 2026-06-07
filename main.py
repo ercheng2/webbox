@@ -5,7 +5,30 @@ import os
 import threading
 import urllib.parse
 import time
+import logging
 from pathlib import Path
+
+# ===== 版本号 =====
+VERSION = '3.19'
+
+# ===== 日志 =====
+def setup_logging():
+    try:
+        if sys.platform == 'win32':
+            log_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
+        else:
+            log_dir = Path.home() / '.webbox'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / 'webbox.log'
+        logging.basicConfig(
+            filename=str(log_file),
+            level=logging.DEBUG,
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            encoding='utf-8'
+        )
+        logging.info(f'===== WebBox v{VERSION} 启动 =====')
+    except Exception as e:
+        print(f'[WebBox] 日志初始化失败: {e}')
 
 # ===== 配置管理 =====
 _custom_config_path = None  # 通过 --config 参数指定的配置文件路径
@@ -24,6 +47,7 @@ def get_config_path():
     if _custom_config_path:
         p = Path(_custom_config_path)
         p.parent.mkdir(parents=True, exist_ok=True)
+        logging.info(f'配置路径(--config): {p}')
         return p
     # 2. 从默认路径读取指针，如果指向自定义路径且文件存在，则使用自定义路径
     default_path = get_default_config_path()
@@ -35,11 +59,18 @@ def get_config_path():
                 if custom and custom != str(default_path):
                     custom_path = Path(custom)
                     if custom_path.exists():
-                        custom_path.parent.mkdir(parents=True, exist_ok=True)
+                        logging.info(f'配置路径(指针→自定义): {custom_path}')
                         return custom_path
-        except:
-            pass
+                    else:
+                        logging.warning(f'指针指向的自定义路径不存在: {custom_path}，回退默认路径')
+                elif custom and custom == str(default_path):
+                    logging.info(f'配置路径(默认，指针=默认): {default_path}')
+        except Exception as e:
+            logging.warning(f'读取默认配置指针失败: {e}，使用默认路径')
+    else:
+        logging.info(f'默认配置文件不存在，将创建: {default_path}')
     # 3. 没有自定义路径，用默认路径
+    logging.info(f'配置路径(默认): {default_path}')
     return default_path
 
 def load_config():
@@ -52,38 +83,100 @@ def load_config():
                 if isinstance(data, dict) and data.get('url'):
                     if 'fullscreen' not in data:
                         data['fullscreen'] = True
+                    logging.info(f'加载配置成功: {config_file}, url={data.get("url","")[:50]}')
                     return data
-        except:
-            pass
+                else:
+                    logging.info(f'配置文件无有效URL: {config_file}')
+        except Exception as e:
+            logging.warning(f'加载配置失败: {config_file}, 错误: {e}')
+    else:
+        logging.info(f'配置文件不存在: {config_file}')
     return default
 
 def save_config(data, target_path=None):
-    """保存配置，target_path 可指定另存为的路径"""
-    if target_path:
-        config_file = Path(target_path)
-    else:
-        config_file = get_config_path()
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    # 记录当前配置文件路径
-    data['config_file'] = str(config_file)
-    # 保存到目标路径
-    with open(config_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    # 同时更新默认路径的指针（如果目标路径不是默认路径）
-    default_path = get_default_config_path()
-    if config_file != default_path:
+    """保存配置，target_path 可指定另存为的路径。返回 {'ok': True/False, 'error': str, 'path': str}"""
+    errors = []
+    try:
+        if target_path:
+            config_file = Path(target_path)
+        else:
+            config_file = get_config_path()
+        
+        # 确保目标路径的父目录存在
         try:
-            pointer = {'config_file': str(config_file)}
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            errors.append(f'创建目录失败 {config_file.parent}: {e}')
+            logging.error(f'创建目录失败: {config_file.parent}, 错误: {e}')
+            return {'ok': False, 'error': '; '.join(errors), 'path': str(config_file)}
+        
+        # 记录当前配置文件路径
+        data['config_file'] = str(config_file)
+        
+        # 保存到目标路径
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logging.info(f'配置已保存到: {config_file}')
+        except Exception as e:
+            errors.append(f'写入配置文件失败 {config_file}: {e}')
+            logging.error(f'写入配置文件失败: {config_file}, 错误: {e}')
+            return {'ok': False, 'error': '; '.join(errors), 'path': str(config_file)}
+        
+        # 验证：读回来确认
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                verify = json.load(f)
+            if verify.get('url') != data.get('url'):
+                errors.append(f'验证失败：写入的URL与预期不符')
+                logging.error(f'配置验证失败: 写入URL={verify.get("url")}, 预期={data.get("url")}')
+            else:
+                logging.info(f'配置验证通过: {config_file}')
+        except Exception as e:
+            errors.append(f'验证读回失败: {e}')
+            logging.warning(f'配置验证读回失败: {e}')
+        
+        # 同时更新默认路径的指针（如果目标路径不是默认路径）
+        default_path = get_default_config_path()
+        if config_file != default_path:
+            # 分离读取和写入的异常处理
+            pointer = None
+            # 1. 先尝试读取默认路径的旧内容
             if default_path.exists():
-                with open(default_path, 'r', encoding='utf-8') as f:
-                    old = json.load(f)
+                try:
+                    with open(default_path, 'r', encoding='utf-8') as f:
+                        old = json.load(f)
                     if isinstance(old, dict):
                         old['config_file'] = str(config_file)
                         pointer = old
-            with open(default_path, 'w', encoding='utf-8') as f:
-                json.dump(pointer, f, ensure_ascii=False, indent=2)
-        except:
-            pass
+                        logging.info(f'读取默认配置用于更新指针成功')
+                except Exception as e:
+                    logging.warning(f'读取默认配置失败(将创建新指针): {e}')
+            
+            # 如果读取失败或文件不存在，使用最小指针
+            if pointer is None:
+                pointer = {'config_file': str(config_file)}
+            
+            # 2. 写入指针到默认路径
+            try:
+                default_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(default_path, 'w', encoding='utf-8') as f:
+                    json.dump(pointer, f, ensure_ascii=False, indent=2)
+                logging.info(f'指针已更新到默认路径: {default_path} → {config_file}')
+            except Exception as e:
+                errors.append(f'写入指针到默认路径失败: {e}')
+                logging.error(f'写入指针到默认路径失败: {default_path}, 错误: {e}')
+        else:
+            # 保存到默认路径，清除旧指针（如果有的话）
+            logging.info(f'配置保存到默认路径，无需更新指针')
+        
+        if errors:
+            return {'ok': True, 'error': '; '.join(errors), 'path': str(config_file), 'warning': True}
+        return {'ok': True, 'error': '', 'path': str(config_file)}
+    
+    except Exception as e:
+        logging.error(f'save_config 意外错误: {e}')
+        return {'ok': False, 'error': str(e), 'path': ''}
 
 # ===== JS代码：不拦截链接点击，让浏览器原生处理 =====
 JS_CODE = '''
@@ -226,10 +319,14 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
 .checkbox-field input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
 .checkbox-field label { margin: 0; cursor: pointer; font-size: 15px; }
 .hint { margin: 24px 0; padding: 14px 16px; background: #f8f9fa; border-radius: 10px; font-size: 14px; color: #666; }
-.btn { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+.btn { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; transition: all 0.2s; }
 .btn:hover { box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
 .btn-clear { width: 100%; padding: 12px; border: 2px solid #e74c3c; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; background: white; color: #e74c3c; margin-top: 12px; }
 .btn-clear:hover { background: #e74c3c; color: white; }
+.save-result { margin-top: 12px; padding: 12px 16px; border-radius: 10px; font-size: 14px; display: none; }
+.save-result.success { display: block; background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+.save-result.error { display: block; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.save-result.warning { display: block; background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
 </style>
 </head>
 <body>
@@ -256,7 +353,8 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <input type="text" id="configFileInput" placeholder="如 D:\\WebBox\\site1.json 或留空">
     </div>
     <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 指定不同的配置文件路径，可以同时打开多个 WebBox 显示不同网页</div>
-    <button class="btn" onclick="saveAndReload()">保存</button>
+    <button class="btn" id="saveBtn" onclick="saveAndReload()">保存</button>
+    <div class="save-result" id="saveResult"></div>
     <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
 </div>
 <script>
@@ -264,6 +362,13 @@ var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
 var downloadDirInput = document.getElementById('downloadDirInput');
+var saveBtn = document.getElementById('saveBtn');
+var saveResult = document.getElementById('saveResult');
+
+function showSaveResult(type, msg) {
+    saveResult.className = 'save-result ' + type;
+    saveResult.textContent = msg;
+}
 
 function loadConfig() {
     if (window.pywebview && window.pywebview.api) {
@@ -290,10 +395,33 @@ function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
     var configFileInput = document.getElementById('configFileInput');
+    saveBtn.textContent = '保存中...';
+    saveBtn.disabled = true;
+    showSaveResult('', '');
+    
     pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim(), configFileInput.value.trim()).then(function(result) {
-        if (result && result.config_file) {
+        saveBtn.textContent = '保存';
+        saveBtn.disabled = false;
+        if (!result) {
+            showSaveResult('error', '❌ 保存失败：未收到返回结果');
+            return;
+        }
+        if (result.ok === false || result.error) {
+            showSaveResult('error', '❌ 保存失败：' + (result.error || '未知错误'));
+            return;
+        }
+        if (result.warning) {
+            showSaveResult('warning', '⚠️ 保存成功但有警告：' + result.error);
+        } else {
+            showSaveResult('success', '✅ 保存成功！配置文件：' + (result.config_file || result.path || ''));
+        }
+        if (result.config_file) {
             configFileInput.value = result.config_file;
         }
+    }).catch(function(err) {
+        saveBtn.textContent = '保存';
+        saveBtn.disabled = false;
+        showSaveResult('error', '❌ 保存出错：' + err);
     });
 }
 
@@ -329,7 +457,7 @@ def get_download_dir():
     custom_dir = config.get('download_dir', '').strip()
     if custom_dir:
         d = Path(custom_dir)
-        print(f"[WebBox] 使用自定义下载路径: {d}")
+        logging.info(f'使用自定义下载路径: {d}')
     elif sys.platform == 'win32':
         d = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
     else:
@@ -337,7 +465,7 @@ def get_download_dir():
     try:
         d.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        print(f"[WebBox] 创建下载目录失败: {e}，使用默认路径")
+        logging.warning(f'创建下载目录失败: {e}，使用默认路径')
         if sys.platform == 'win32':
             d = Path(os.environ.get('USERPROFILE', '.')) / 'Downloads' / 'WebBox'
         else:
@@ -354,24 +482,21 @@ def patch_download_handler():
         # 兼容不同版本的pywebview类名
         BrowserClass = getattr(edgechromium, 'EdgeChrome', None) or getattr(edgechromium, 'Browser', None)
         if not BrowserClass:
-            print("[WebBox] 找不到浏览器类，下载Hook失败")
+            logging.warning('找不到浏览器类，下载Hook失败')
             return
-        
-        original_on_download = getattr(BrowserClass, 'on_download_starting', None)
         
         def custom_on_download(self, sender, args):
             download_dir = get_download_dir()
             original_filename = os.path.basename(args.ResultFilePath)
             save_path = str(download_dir / original_filename)
             
-            # 设置下载路径并抑制默认对话框
             args.ResultFilePath = save_path
             try:
                 args.Handled = True
             except:
                 pass
             
-            print(f"[WebBox] 下载拦截: {original_filename} → {save_path}")
+            logging.info(f'下载拦截: {original_filename} → {save_path}')
             
             filename = original_filename
             def notify_start():
@@ -417,9 +542,9 @@ def patch_download_handler():
             threading.Thread(target=wait_for_download, daemon=True).start()
         
         BrowserClass.on_download_starting = custom_on_download
-        print(f"[WebBox] 已Hook下载处理器({BrowserClass.__name__})：自动下载到指定目录")
+        logging.info(f'已Hook下载处理器({BrowserClass.__name__})：自动下载到指定目录')
     except Exception as e:
-        print(f"[WebBox] Hook下载处理器失败: {e}")
+        logging.error(f'Hook下载处理器失败: {e}')
 
 # ===== API =====
 class BrowseApi:
@@ -440,13 +565,12 @@ class BrowseApi:
             download_dir = str(get_download_dir())
             os.startfile(download_dir)
         except Exception as e:
-            print(f"[WebBox] 打开文件夹失败: {e}")
+            logging.error(f'打开文件夹失败: {e}')
         return {'ok': True}
     
     def clear_browsing_data(self):
         """清除浏览记录：标记清除标记，下次启动时删除WebView2数据"""
         try:
-            # 写一个清除标记文件
             if sys.platform == 'win32':
                 marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
             else:
@@ -454,9 +578,9 @@ class BrowseApi:
             marker_dir.mkdir(parents=True, exist_ok=True)
             marker_file = marker_dir / '.clear_data'
             marker_file.write_text('1', encoding='utf-8')
-            print("[WebBox] 已标记清除，重启后生效")
+            logging.info('已标记清除，重启后生效')
         except Exception as e:
-            print(f"[WebBox] 标记清除失败: {e}")
+            logging.error(f'标记清除失败: {e}')
         return {'ok': True, 'need_restart': True}
     
     def download_file(self, url):
@@ -469,26 +593,22 @@ class BrowseApi:
                 if not filename or '.' not in filename:
                     filename = 'download'
                 save_path = download_dir / filename
-                # 避免重名
                 counter = 1
                 while save_path.exists():
                     name, ext = os.path.splitext(filename)
                     save_path = download_dir / f"{name}_{counter}{ext}"
                     counter += 1
-                # 通知开始下载
                 browse_window.evaluate_js('window.__webbox_download_start({})'.format(
                     json.dumps(filename)
                 ))
-                # 下载
                 urllib.request.urlretrieve(url, str(save_path))
-                # 通知下载完成
                 browse_window.evaluate_js('window.__webbox_download_done({}, {})'.format(
                     json.dumps(filename),
                     json.dumps(str(save_path))
                 ))
-                print(f"[WebBox] 下载完成: {save_path}")
+                logging.info(f'下载完成: {save_path}')
             except Exception as e:
-                print(f"[WebBox] 下载失败: {e}")
+                logging.error(f'下载失败: {e}')
                 try:
                     browse_window.evaluate_js('window.__webbox_download_start({})'.format(
                         json.dumps(f"下载失败: {str(e)}")
@@ -499,8 +619,7 @@ class BrowseApi:
         return {'ok': True}
     
     def handle_link(self, href):
-        """处理window.open拦截（简化版，链接点击不再走这里）"""
-        # 解析相对URL
+        """处理window.open拦截"""
         if not href.startswith('http://') and not href.startswith('https://'):
             try:
                 current_url = browse_window.get_current_url() if browse_window else ''
@@ -511,7 +630,6 @@ class BrowseApi:
             except:
                 href = 'https://' + href
         
-        # window.location.href 同窗口导航
         if browse_window:
             browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
@@ -520,7 +638,7 @@ class BrowseApi:
         global browse_window, current_fullscreen
         url = url.strip()
         if not url:
-            return {'error': '请输入网址'}
+            return {'ok': False, 'error': '请输入网址'}
         if not url.startswith('http://') and not url.startswith('https://'):
             url = 'https://' + url
         config = {
@@ -529,15 +647,21 @@ class BrowseApi:
             'fullscreen': fullscreen,
             'download_dir': download_dir.strip(),
         }
-        save_config(config, target_path=config_file.strip() or None)
+        target = config_file.strip() or None
+        logging.info(f'save_and_reload: target_path={target}')
+        result = save_config(config, target_path=target)
+        if not result['ok']:
+            logging.error(f'保存失败: {result["error"]}')
+            return result
         if browse_window:
             browse_window.load_url(url)
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
-        # 返回实际保存的配置文件路径
         actual_path = get_config_path()
-        return {'ok': True, 'config_file': str(actual_path)}
+        result['config_file'] = str(actual_path)
+        logging.info(f'保存成功，实际配置路径: {actual_path}')
+        return result
 
 class SettingsApi:
     def get_config(self):
@@ -546,7 +670,7 @@ class SettingsApi:
     def save_and_reload(self, url, title, fullscreen, download_dir='', config_file=''):
         url = url.strip()
         if not url:
-            return {'error': '请输入网址'}
+            return {'ok': False, 'error': '请输入网址'}
         if not url.startswith('http://') and not url.startswith('https://'):
             url = 'https://' + url
         config = {
@@ -555,10 +679,13 @@ class SettingsApi:
             'fullscreen': fullscreen,
             'download_dir': download_dir.strip(),
         }
-        save_config(config, target_path=config_file.strip() or None)
-        # 返回实际保存的配置文件路径
+        target = config_file.strip() or None
+        logging.info(f'save_and_reload(设置页): target_path={target}')
+        result = save_config(config, target_path=target)
         actual_path = get_config_path()
-        return {'ok': True, 'config_file': str(actual_path)}
+        result['config_file'] = str(actual_path)
+        logging.info(f'保存完成，实际配置路径: {actual_path}, 结果: {result}')
+        return result
 
 # ===== 全局快捷键监听 =====
 def start_hotkey_listener():
@@ -567,22 +694,22 @@ def start_hotkey_listener():
         import keyboard
         def open_settings():
             api = BrowseApi()
-            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
+            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
         
         def reload_page():
             if browse_window:
                 try:
                     browse_window.evaluate_js('location.reload()')
-                    print("[WebBox] 已刷新页面")
+                    logging.info('已刷新页面')
                 except Exception as e:
-                    print(f"[WebBox] 刷新失败: {e}")
+                    logging.error(f'刷新失败: {e}')
         
         keyboard.add_hotkey('f1', open_settings)
         keyboard.add_hotkey('f5', reload_page)
-        print("[WebBox] F1=打开设置 F5=刷新页面")
+        logging.info('F1=打开设置 F5=刷新页面')
         keyboard.wait()
     except Exception as e:
-        print(f"快捷键监听失败: {e}")
+        logging.error(f'快捷键监听失败: {e}')
 
 # ===== 获取屏幕工作区尺寸 =====
 def get_screen_size():
@@ -603,13 +730,16 @@ def get_screen_size():
 def main():
     global current_fullscreen, browse_window, _custom_config_path
     
+    # 初始化日志（最先执行）
+    setup_logging()
+    
     # 解析 --config 命令行参数
     args = sys.argv[1:]
     i = 0
     while i < len(args):
         if args[i] == '--config' and i + 1 < len(args):
             _custom_config_path = args[i + 1]
-            print(f"[WebBox] 使用自定义配置文件: {_custom_config_path}")
+            logging.info(f'使用自定义配置文件: {_custom_config_path}')
             i += 2
         else:
             i += 1
@@ -625,18 +755,16 @@ def main():
             app_data = ''
         marker_file = marker_dir / '.clear_data'
         if marker_file.exists():
-            print("[WebBox] 检测到清除标记，正在清除浏览数据...")
+            logging.info('检测到清除标记，正在清除浏览数据...')
             marker_file.unlink(missing_ok=True)
-            # 删除pywebview缓存目录（WebView2用户数据）
-            # pywebview使用 %APPDATA%\pywebview 作为UserDataFolder
             if app_data:
                 pywebview_cache = Path(app_data) / 'pywebview'
                 if pywebview_cache.exists():
                     shutil.rmtree(pywebview_cache, ignore_errors=True)
-                    print(f"[WebBox] 已清除: {pywebview_cache}")
-            print("[WebBox] 浏览数据已清除，请重新打开软件")
+                    logging.info(f'已清除: {pywebview_cache}')
+            logging.info('浏览数据已清除，请重新打开软件')
     except Exception as e:
-        print(f"[WebBox] 清除浏览数据失败: {e}")
+        logging.error(f'清除浏览数据失败: {e}')
     
     # Hook下载：不弹对话框，自动下载到WebBox目录
     patch_download_handler()
@@ -698,7 +826,7 @@ def main():
         browse_window.events.loaded += on_loaded
     else:
         api = SettingsApi()
-        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
+        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=560, resizable=False)
     
     webview.start(private_mode=False)
 
