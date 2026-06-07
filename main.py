@@ -10,11 +10,8 @@ from pathlib import Path
 # ===== 配置管理 =====
 _custom_config_path = None  # 通过 --config 参数指定的配置文件路径
 
-def get_config_path():
-    if _custom_config_path:
-        p = Path(_custom_config_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        return p
+def get_default_config_path():
+    """获取默认配置文件路径（固定不变，用作指针）"""
     if sys.platform == 'win32':
         config_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
     else:
@@ -22,9 +19,32 @@ def get_config_path():
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / 'config.json'
 
+def get_config_path():
+    # 1. 命令行 --config 指定的路径优先级最高
+    if _custom_config_path:
+        p = Path(_custom_config_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    # 2. 从默认路径读取指针，如果指向自定义路径且文件存在，则使用自定义路径
+    default_path = get_default_config_path()
+    if default_path.exists():
+        try:
+            with open(default_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                custom = data.get('config_file', '').strip()
+                if custom and custom != str(default_path):
+                    custom_path = Path(custom)
+                    if custom_path.exists():
+                        custom_path.parent.mkdir(parents=True, exist_ok=True)
+                        return custom_path
+        except:
+            pass
+    # 3. 没有自定义路径，用默认路径
+    return default_path
+
 def load_config():
     config_file = get_config_path()
-    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': '', 'config_file': str(get_config_path())}
+    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': '', 'config_file': str(config_file)}
     if config_file.exists():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -46,8 +66,24 @@ def save_config(data, target_path=None):
     config_file.parent.mkdir(parents=True, exist_ok=True)
     # 记录当前配置文件路径
     data['config_file'] = str(config_file)
+    # 保存到目标路径
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    # 同时更新默认路径的指针（如果目标路径不是默认路径）
+    default_path = get_default_config_path()
+    if config_file != default_path:
+        try:
+            pointer = {'config_file': str(config_file)}
+            if default_path.exists():
+                with open(default_path, 'r', encoding='utf-8') as f:
+                    old = json.load(f)
+                    if isinstance(old, dict):
+                        old['config_file'] = str(config_file)
+                        pointer = old
+            with open(default_path, 'w', encoding='utf-8') as f:
+                json.dump(pointer, f, ensure_ascii=False, indent=2)
+        except:
+            pass
 
 # ===== JS代码：不拦截链接点击，让浏览器原生处理 =====
 JS_CODE = '''
@@ -254,7 +290,11 @@ function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
     var configFileInput = document.getElementById('configFileInput');
-    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim(), configFileInput.value.trim());
+    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim(), configFileInput.value.trim()).then(function(result) {
+        if (result && result.config_file) {
+            configFileInput.value = result.config_file;
+        }
+    });
 }
 
 function clearBrowsingData() {
@@ -495,7 +535,9 @@ class BrowseApi:
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
-        return {'ok': True}
+        # 返回实际保存的配置文件路径
+        actual_path = get_config_path()
+        return {'ok': True, 'config_file': str(actual_path)}
 
 class SettingsApi:
     def get_config(self):
@@ -514,7 +556,9 @@ class SettingsApi:
             'download_dir': download_dir.strip(),
         }
         save_config(config, target_path=config_file.strip() or None)
-        return {'ok': True}
+        # 返回实际保存的配置文件路径
+        actual_path = get_config_path()
+        return {'ok': True, 'config_file': str(actual_path)}
 
 # ===== 全局快捷键监听 =====
 def start_hotkey_listener():
