@@ -293,6 +293,28 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <label>配置文件路径（留空则用默认路径，不同路径可开不同网页）</label>
         <input type="text" id="configFileInput" placeholder="如 D:\\WebBox\\site1.json 或留空">
     </div>
+    <div class="field">
+        <label>🖥 EXE路径（填写要启动的exe完整路径，留空则不显示浮动按钮）</label>
+        <input type="text" id="exePathInput" placeholder="如 D:\\软件\\KZC-KeyGen.exe">
+    </div>
+    <div class="field">
+        <label>按钮文字（可选）</label>
+        <input type="text" id="btnTextInput" placeholder="如 🔧 或 打开工具">
+    </div>
+    <div class="field">
+        <label>按钮位置</label>
+        <select id="btnPositionSelect" style="width:100%;padding:14px 16px;border:2px solid #e0e0e0;border-radius:10px;font-size:16px;">
+            <option value="右下">右下</option>
+            <option value="左下">左下</option>
+            <option value="右上">右上</option>
+            <option value="左上">左上</option>
+            <option value="自定义">自定义</option>
+        </select>
+    </div>
+    <div class="field" id="customCssField" style="display:none;">
+        <label>自定义位置CSS（如 top:100px;left:200px;）</label>
+        <input type="text" id="btnCustomCssInput" placeholder="如 top:100px;left:200px;">
+    </div>
     <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 指定不同的配置文件路径，可以同时打开多个 WebBox 显示不同网页</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
     <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
@@ -649,7 +671,7 @@ def start_hotkey_listener():
         import keyboard
         def open_settings():
             api = BrowseApi()
-            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
+            webview.create_window('修改网址', html=SETTINGS_HTML, js_api=api, width=540, height=740, resizable=False)
         
         def reload_page():
             if browse_window:
@@ -789,7 +811,7 @@ def main():
         browse_window.events.loaded += on_loaded
     else:
         api = SettingsApi()
-        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=500, resizable=False)
+        webview.create_window('WebBox 设置', html=SETTINGS_HTML, js_api=api, width=540, height=740, resizable=False)
     
     webview.start(private_mode=False)
 
