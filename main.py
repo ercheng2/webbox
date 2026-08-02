@@ -609,7 +609,7 @@ class BrowseApi:
         return {'action': 'navigate'}
     
     def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
-        global browse_window, current_fullscreen
+        global browse_window, current_fullscreen, _custom_config_path
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -625,21 +625,15 @@ class BrowseApi:
             'btn_position': btn_position,
             'btn_custom_css': btn_custom_css.strip(),
         }
+        # 更新全局配置路径，确保后续 load_config() 读取正确的文件
+        if config_file.strip():
+            _custom_config_path = config_file.strip()
         save_config(config, target_path=config_file.strip() or None)
         if browse_window:
             browse_window.load_url(url)
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
-            # 重新注入浮动按钮
-            float_cfg = {
-                'exe_path': config['exe_path'],
-                'btn_text': config['btn_text'],
-                'btn_position': config['btn_position'],
-                'btn_custom_css': config['btn_custom_css'],
-            }
-            import json as _json
-            browse_window.evaluate_js('window.__webbox_setup_float_btn(' + _json.dumps(float_cfg) + ')')
         return {'ok': True}
 
 class SettingsApi:
@@ -647,6 +641,7 @@ class SettingsApi:
         return load_config()
     
     def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
+        global _custom_config_path
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -662,6 +657,8 @@ class SettingsApi:
             'btn_position': btn_position,
             'btn_custom_css': btn_custom_css.strip(),
         }
+        if config_file.strip():
+            _custom_config_path = config_file.strip()
         save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
 
