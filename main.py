@@ -104,10 +104,11 @@ JS_CODE = '''
         btn.textContent = cfg.btn_text || '🔧';
         // 基础样式
         var css = 'position:fixed;z-index:999998;pointer-events:auto;cursor:pointer;' +
-            'width:50px;height:50px;border-radius:50%;' +
+            'min-width:50px;height:50px;border-radius:25px;padding:0 16px;' +
             'background:rgba(102,126,234,0.9);color:#fff;' +
             'display:flex;align-items:center;justify-content:center;' +
-            'font-size:18px;font-weight:bold;box-shadow:0 4px 16px rgba(0,0,0,0.3);' +
+            'font-size:18px;font-weight:bold;white-space:nowrap;' +
+            'box-shadow:0 4px 16px rgba(0,0,0,0.3);' +
             'user-select:none;transition:transform 0.15s,box-shadow 0.15s;';
         // 位置：支持预设 + 自定义像素
         var pos = cfg.btn_position || '右下';
