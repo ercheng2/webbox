@@ -23,6 +23,7 @@ def get_config_path():
     return config_dir / 'config.json'
 
 def load_config():
+    global _custom_config_path
     config_file = get_config_path()
     default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': '', 'config_file': str(get_config_path())}
     if config_file.exists():
@@ -32,6 +33,21 @@ def load_config():
                 if isinstance(data, dict) and data.get('url'):
                     if 'fullscreen' not in data:
                         data['fullscreen'] = True
+                    # 如果默认配置中 config_file 指向其他文件，且 _custom_config_path 为空，自动跟随
+                    cfg_file = data.get('config_file', '')
+                    if cfg_file and not _custom_config_path and cfg_file != str(config_file):
+                        alt_path = Path(cfg_file)
+                        if alt_path.exists():
+                            try:
+                                with open(alt_path, 'r', encoding='utf-8') as af:
+                                    alt_data = json.load(af)
+                                    if isinstance(alt_data, dict) and alt_data.get('url'):
+                                        _custom_config_path = cfg_file
+                                        if 'fullscreen' not in alt_data:
+                                            alt_data['fullscreen'] = True
+                                        return alt_data
+                            except:
+                                pass
                     return data
         except:
             pass
@@ -628,8 +644,8 @@ class BrowseApi:
         # 更新全局配置路径，确保后续 load_config() 读取正确的文件
         if config_file.strip():
             _custom_config_path = config_file.strip()
-            # 同时保存到默认路径，确保重启后不丢失配置
-            save_config(config, target_path=None)
+            # 在默认路径存一个指针，确保重启后能找到用户指定的配置文件
+            save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
         save_config(config, target_path=config_file.strip() or None)
         if browse_window:
             browse_window.load_url(url)
@@ -661,8 +677,8 @@ class SettingsApi:
         }
         if config_file.strip():
             _custom_config_path = config_file.strip()
-            # 同时保存到默认路径，确保重启后不丢失配置
-            save_config(config, target_path=None)
+            # 在默认路径存一个指针，确保重启后能找到用户指定的配置文件
+            save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
         save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
 
