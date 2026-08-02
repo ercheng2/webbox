@@ -644,9 +644,10 @@ class BrowseApi:
         }
         # 更新全局配置路径，确保后续 load_config() 读取正确的文件
         if config_file.strip():
-            _custom_config_path = config_file.strip()
-            # 在默认路径存一个指针，确保重启后能找到用户指定的配置文件
+            # ⚠️ 必须先存指针再设 _custom_config_path，否则 save_config(target_path=None)
+            # 内部调用 get_config_path() 会返回自定义路径而非默认路径，指针存错位置
             save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
+            _custom_config_path = config_file.strip()
         save_config(config, target_path=config_file.strip() or None)
         if browse_window:
             browse_window.load_url(url)
@@ -677,9 +678,9 @@ class SettingsApi:
             'btn_custom_css': btn_custom_css.strip(),
         }
         if config_file.strip():
-            _custom_config_path = config_file.strip()
-            # 在默认路径存一个指针，确保重启后能找到用户指定的配置文件
+            # ⚠️ 必须先存指针再设 _custom_config_path（同 BrowseApi）
             save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
+            _custom_config_path = config_file.strip()
         save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
 
