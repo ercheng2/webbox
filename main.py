@@ -628,6 +628,8 @@ class BrowseApi:
         # 更新全局配置路径，确保后续 load_config() 读取正确的文件
         if config_file.strip():
             _custom_config_path = config_file.strip()
+            # 同时保存到默认路径，确保重启后不丢失配置
+            save_config(config, target_path=None)
         save_config(config, target_path=config_file.strip() or None)
         if browse_window:
             browse_window.load_url(url)
@@ -659,6 +661,8 @@ class SettingsApi:
         }
         if config_file.strip():
             _custom_config_path = config_file.strip()
+            # 同时保存到默认路径，确保重启后不丢失配置
+            save_config(config, target_path=None)
         save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
 
