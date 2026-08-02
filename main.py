@@ -60,8 +60,9 @@ def save_config(data, target_path=None):
     else:
         config_file = get_config_path()
     config_file.parent.mkdir(parents=True, exist_ok=True)
-    # 记录当前配置文件路径
-    data['config_file'] = str(config_file)
+    # 记录当前配置文件路径（保留已有的 config_file 指针，避免覆盖）
+    if not data.get('config_file'):
+        data['config_file'] = str(config_file)
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
