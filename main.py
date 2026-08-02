@@ -786,12 +786,13 @@ def main():
                     })();
                 ''')
                 browse_window.evaluate_js(JS_CODE)
-                # 注入浮动按钮配置
+                # 注入浮动按钮配置（重新加载配置，避免使用启动时的旧值）
+                latest_config = load_config()
                 float_cfg = {
-                    'exe_path': config.get('exe_path', ''),
-                    'btn_text': config.get('btn_text', '🔧'),
-                    'btn_position': config.get('btn_position', '右下'),
-                    'btn_custom_css': config.get('btn_custom_css', ''),
+                    'exe_path': latest_config.get('exe_path', ''),
+                    'btn_text': latest_config.get('btn_text', '🔧'),
+                    'btn_position': latest_config.get('btn_position', '右下'),
+                    'btn_custom_css': latest_config.get('btn_custom_css', ''),
                 }
                 if float_cfg['exe_path']:
                     browse_window.evaluate_js('window.__webbox_setup_float_btn(' + json.dumps(float_cfg) + ')')
