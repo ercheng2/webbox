@@ -92,6 +92,80 @@ JS_CODE = '''
         }, 8000);
     };
     
+    // ===== 浮动按钮：打开EXE =====
+    window.__webbox_setup_float_btn = function(cfg) {
+        // 移除旧按钮
+        var old = document.getElementById('__webbox_float_btn');
+        if (old) old.remove();
+        if (!cfg || !cfg.exe_path) return;
+        
+        var btn = document.createElement('div');
+        btn.id = '__webbox_float_btn';
+        btn.textContent = cfg.btn_text || '🔧';
+        // 基础样式
+        var css = 'position:fixed;z-index:999998;pointer-events:auto;cursor:pointer;' +
+            'width:50px;height:50px;border-radius:50%;' +
+            'background:rgba(102,126,234,0.9);color:#fff;' +
+            'display:flex;align-items:center;justify-content:center;' +
+            'font-size:18px;font-weight:bold;box-shadow:0 4px 16px rgba(0,0,0,0.3);' +
+            'user-select:none;transition:transform 0.15s,box-shadow 0.15s;';
+        // 位置：支持预设 + 自定义像素
+        var pos = cfg.btn_position || '右下';
+        if (pos === '自定义' && cfg.btn_custom_css) {
+            css += cfg.btn_custom_css;
+        } else {
+            switch(pos) {
+                case '左上': css += 'top:20px;left:20px;'; break;
+                case '右上': css += 'top:20px;right:20px;'; break;
+                case '左下': css += 'bottom:20px;left:20px;'; break;
+                case '右下': default: css += 'bottom:20px;right:20px;'; break;
+            }
+        }
+        btn.style.cssText = css;
+        
+        // 悬停效果
+        btn.onmouseenter = function() { btn.style.transform='scale(1.1)'; btn.style.boxShadow='0 6px 24px rgba(0,0,0,0.4)'; };
+        btn.onmouseleave = function() { btn.style.transform='scale(1)'; btn.style.boxShadow='0 4px 16px rgba(0,0,0,0.3)'; };
+        
+        // 点击打开EXE
+        btn.onclick = function() {
+            if (window.pywebview && window.pywebview.api) {
+                pywebview.api.open_exe();
+            }
+        };
+        
+        // 拖拽移动
+        var dragging = false, startX, startY, origLeft, origTop;
+        btn.onmousedown = function(e) {
+            if (e.button !== 0) return;
+            dragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            var rect = btn.getBoundingClientRect();
+            origLeft = rect.left;
+            origTop = rect.top;
+            btn.style.transition = 'none';
+            e.preventDefault();
+        };
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var dx = e.clientX - startX;
+            var dy = e.clientY - startY;
+            btn.style.left = (origLeft + dx) + 'px';
+            btn.style.top = (origTop + dy) + 'px';
+            btn.style.right = 'auto';
+            btn.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', function() {
+            if (dragging) {
+                dragging = false;
+                btn.style.transition = 'transform 0.15s,box-shadow 0.15s';
+            }
+        });
+        
+        document.body.appendChild(btn);
+    };
+    
     // ===== 拦截window.open：改为同窗口导航 =====
     window.open = function(url, target, features) {
         if (url && !url.startsWith('javascript:') && !url.startsWith('#')) {
@@ -228,6 +302,15 @@ var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
 var downloadDirInput = document.getElementById('downloadDirInput');
+var exePathInput = document.getElementById('exePathInput');
+var btnTextInput = document.getElementById('btnTextInput');
+var btnPositionSelect = document.getElementById('btnPositionSelect');
+var btnCustomCssInput = document.getElementById('btnCustomCssInput');
+var customCssField = document.getElementById('customCssField');
+
+btnPositionSelect.onchange = function() {
+    customCssField.style.display = (this.value === '自定义') ? 'block' : 'none';
+};
 
 function loadConfig() {
     if (window.pywebview && window.pywebview.api) {
@@ -238,6 +321,11 @@ function loadConfig() {
             if (c.download_dir) downloadDirInput.value = c.download_dir;
             var configFileInput = document.getElementById('configFileInput');
             if (c.config_file) configFileInput.value = c.config_file;
+            if (c.exe_path) exePathInput.value = c.exe_path;
+            if (c.btn_text) btnTextInput.value = c.btn_text;
+            if (c.btn_position) btnPositionSelect.value = c.btn_position;
+            if (c.btn_custom_css) btnCustomCssInput.value = c.btn_custom_css;
+            customCssField.style.display = (btnPositionSelect.value === '自定义') ? 'block' : 'none';
             urlInput.focus();
         }).catch(function(err) {
             setTimeout(loadConfig, 100);
@@ -254,7 +342,12 @@ function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
     var configFileInput = document.getElementById('configFileInput');
-    pywebview.api.save_and_reload(url, titleInput.value.trim(), fullscreenCheck.checked, downloadDirInput.value.trim(), configFileInput.value.trim());
+    pywebview.api.save_and_reload(
+        url, titleInput.value.trim(), fullscreenCheck.checked,
+        downloadDirInput.value.trim(), configFileInput.value.trim(),
+        exePathInput.value.trim(), btnTextInput.value.trim() || '🔧',
+        btnPositionSelect.value, btnCustomCssInput.value.trim()
+    );
 }
 
 function clearBrowsingData() {
@@ -403,6 +496,22 @@ class BrowseApi:
             print(f"[WebBox] 打开文件夹失败: {e}")
         return {'ok': True}
     
+    def open_exe(self):
+        """打开配置的EXE文件"""
+        try:
+            config = load_config()
+            exe_path = config.get('exe_path', '').strip()
+            if not exe_path:
+                return {'ok': False, 'error': '未配置EXE路径'}
+            if not os.path.exists(exe_path):
+                return {'ok': False, 'error': f'文件不存在: {exe_path}'}
+            os.startfile(exe_path)
+            print(f"[WebBox] 已启动: {exe_path}")
+            return {'ok': True}
+        except Exception as e:
+            print(f"[WebBox] 打开EXE失败: {e}")
+            return {'ok': False, 'error': str(e)}
+    
     def clear_browsing_data(self):
         """清除浏览记录：标记清除标记，下次启动时删除WebView2数据"""
         try:
@@ -476,7 +585,7 @@ class BrowseApi:
             browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
     
-    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file=''):
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
         global browse_window, current_fullscreen
         url = url.strip()
         if not url:
@@ -488,6 +597,10 @@ class BrowseApi:
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
             'download_dir': download_dir.strip(),
+            'exe_path': exe_path.strip(),
+            'btn_text': btn_text.strip() or '🔧',
+            'btn_position': btn_position,
+            'btn_custom_css': btn_custom_css.strip(),
         }
         save_config(config, target_path=config_file.strip() or None)
         if browse_window:
@@ -495,13 +608,22 @@ class BrowseApi:
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
+            # 重新注入浮动按钮
+            float_cfg = {
+                'exe_path': config['exe_path'],
+                'btn_text': config['btn_text'],
+                'btn_position': config['btn_position'],
+                'btn_custom_css': config['btn_custom_css'],
+            }
+            import json as _json
+            browse_window.evaluate_js('window.__webbox_setup_float_btn(' + _json.dumps(float_cfg) + ')')
         return {'ok': True}
 
 class SettingsApi:
     def get_config(self):
         return load_config()
     
-    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file=''):
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
         url = url.strip()
         if not url:
             return {'error': '请输入网址'}
@@ -512,6 +634,10 @@ class SettingsApi:
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
             'download_dir': download_dir.strip(),
+            'exe_path': exe_path.strip(),
+            'btn_text': btn_text.strip() or '🔧',
+            'btn_position': btn_position,
+            'btn_custom_css': btn_custom_css.strip(),
         }
         save_config(config, target_path=config_file.strip() or None)
         return {'ok': True}
@@ -637,6 +763,15 @@ def main():
                     })();
                 ''')
                 browse_window.evaluate_js(JS_CODE)
+                # 注入浮动按钮配置
+                float_cfg = {
+                    'exe_path': config.get('exe_path', ''),
+                    'btn_text': config.get('btn_text', '🔧'),
+                    'btn_position': config.get('btn_position', '右下'),
+                    'btn_custom_css': config.get('btn_custom_css', ''),
+                }
+                if float_cfg['exe_path']:
+                    browse_window.evaluate_js('window.__webbox_setup_float_btn(' + json.dumps(float_cfg) + ')')
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:
