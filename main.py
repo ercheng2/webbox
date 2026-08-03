@@ -132,7 +132,7 @@ JS_CODE = '''
         btn.textContent = cfg.btn_text || '🔧';
         // 基础样式
         var css = 'position:fixed;z-index:999998;pointer-events:auto;cursor:pointer;' +
-            'min-width:50px;height:50px;border-radius:25px;padding:0 16px;' +
+            'min-width:50px;height:50px;border-radius:6px;padding:0 16px;' +
             'background:rgba(102,126,234,0.9);color:#fff;' +
             'display:flex;align-items:center;justify-content:center;' +
             'font-size:18px;font-weight:bold;white-space:nowrap;' +
@@ -189,6 +189,11 @@ JS_CODE = '''
             if (dragging) {
                 dragging = false;
                 btn.style.transition = 'transform 0.15s,box-shadow 0.15s';
+                // 保存拖拽后的位置
+                var rect = btn.getBoundingClientRect();
+                if (window.pywebview && window.pywebview.api) {
+                    pywebview.api.save_float_btn_position(rect.top, rect.left);
+                }
             }
         });
         
@@ -340,7 +345,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <label>自定义位置CSS（如 top:100px;left:200px;）</label>
         <input type="text" id="btnCustomCssInput" placeholder="如 top:100px;left:200px;">
     </div>
-    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 配置自动保存在 exe 同目录下的 config.json，拷贝到其他电脑直接可用</div>
+    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 配置自动保存在 exe 同目录下，拷贝到其他电脑直接可用<br>🖱 浮动按钮拖拽后自动记住位置，下次打开不变</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
     <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
 </div>
@@ -577,6 +582,19 @@ class BrowseApi:
             return {'ok': True}
         except Exception as e:
             print(f"[WebBox] 打开EXE失败: {e}")
+            return {'ok': False, 'error': str(e)}
+    
+    def save_float_btn_position(self, top, left):
+        """保存浮动按钮拖拽后的位置"""
+        try:
+            config = load_config()
+            config['btn_position'] = '自定义'
+            config['btn_custom_css'] = f'top:{int(top)}px;left:{int(left)}px;'
+            ok = save_config(config, target_path=get_config_path())
+            print(f"[WebBox] 浮动按钮位置已保存: top={int(top)}px, left={int(left)}px")
+            return {'ok': ok}
+        except Exception as e:
+            print(f"[WebBox] 保存按钮位置失败: {e}")
             return {'ok': False, 'error': str(e)}
     
     def clear_browsing_data(self):
