@@ -319,10 +319,6 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <input type="text" id="downloadDirInput" placeholder="如 D:\\Downloads 或留空">
     </div>
     <div class="field">
-        <label>配置文件路径（留空则默认保存在 exe 同目录下的 config.json）</label>
-        <input type="text" id="configFileInput" placeholder="如 D:\\WebBox\\site1.json 或留空">
-    </div>
-    <div class="field">
         <label>🖥 EXE路径（填写要启动的exe完整路径，留空则不显示浮动按钮）</label>
         <input type="text" id="exePathInput" placeholder="如 D:\\软件\\KZC-KeyGen.exe">
     </div>
@@ -344,7 +340,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <label>自定义位置CSS（如 top:100px;left:200px;）</label>
         <input type="text" id="btnCustomCssInput" placeholder="如 top:100px;left:200px;">
     </div>
-    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 指定不同的配置文件路径，可以同时打开多个 WebBox 显示不同网页</div>
+    <div class="hint">💡 按 F1 可随时打开此设置窗口 | F5 刷新当前页面<br>📌 配置自动保存在 exe 同目录下的 config.json，拷贝到其他电脑直接可用</div>
     <button class="btn" onclick="saveAndReload()">保存</button>
     <button class="btn-clear" onclick="clearBrowsingData()">🗑 清除浏览记录（用户名、密码、缓存）</button>
 </div>
@@ -370,8 +366,6 @@ function loadConfig() {
             if (c.title) titleInput.value = c.title;
             fullscreenCheck.checked = c.fullscreen !== false;
             if (c.download_dir) downloadDirInput.value = c.download_dir;
-            var configFileInput = document.getElementById('configFileInput');
-            if (c.config_file) configFileInput.value = c.config_file;
             if (c.exe_path) exePathInput.value = c.exe_path;
             if (c.btn_text) btnTextInput.value = c.btn_text;
             if (c.btn_position) btnPositionSelect.value = c.btn_position;
@@ -392,13 +386,12 @@ setTimeout(loadConfig, 300);
 function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
-    var configFileInput = document.getElementById('configFileInput');
     var btn = document.querySelector('.btn');
     btn.textContent = '保存中...';
     btn.disabled = true;
     pywebview.api.save_and_reload(
         url, titleInput.value.trim(), fullscreenCheck.checked,
-        downloadDirInput.value.trim(), configFileInput.value.trim(),
+        downloadDirInput.value.trim(), '',
         exePathInput.value.trim(), btnTextInput.value.trim() || '🔧',
         btnPositionSelect.value, btnCustomCssInput.value.trim()
     ).then(function(r) {
