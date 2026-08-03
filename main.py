@@ -10,17 +10,21 @@ from pathlib import Path
 # ===== 配置管理 =====
 _custom_config_path = None  # 通过 --config 参数指定的配置文件路径
 
-def get_config_path():
-    if _custom_config_path:
-        p = Path(_custom_config_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        return p
+def get_default_config_path():
+    """获取默认配置文件路径（不受 _custom_config_path 影响）"""
     if sys.platform == 'win32':
         config_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
     else:
         config_dir = Path.home() / '.webbox'
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / 'config.json'
+
+def get_config_path():
+    if _custom_config_path:
+        p = Path(_custom_config_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    return get_default_config_path()
 
 def load_config():
     global _custom_config_path
@@ -45,12 +49,17 @@ def load_config():
                                         _custom_config_path = cfg_file
                                         if 'fullscreen' not in alt_data:
                                             alt_data['fullscreen'] = True
+                                        print(f"[WebBox] 配置跟随指针 → {cfg_file}")
                                         return alt_data
-                            except:
-                                pass
+                            except Exception as e:
+                                print(f"[WebBox] 指针目标文件读取失败: {cfg_file} - {e}")
+                        else:
+                            print(f"[WebBox] 指针目标文件不存在: {cfg_file}，使用默认配置")
+                    print(f"[WebBox] 加载配置: {config_file}")
                     return data
-        except:
-            pass
+        except Exception as e:
+            print(f"[WebBox] 配置文件读取失败: {config_file} - {e}")
+    print(f"[WebBox] 无配置，使用默认设置")
     return default
 
 def save_config(data, target_path=None):
@@ -59,12 +68,18 @@ def save_config(data, target_path=None):
         config_file = Path(target_path)
     else:
         config_file = get_config_path()
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    # 记录当前配置文件路径（保留已有的 config_file 指针，避免覆盖）
-    if not data.get('config_file'):
-        data['config_file'] = str(config_file)
-    with open(config_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        # 记录当前配置文件路径（保留已有的 config_file 指针，避免覆盖）
+        if not data.get('config_file'):
+            data['config_file'] = str(config_file)
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"[WebBox] 配置已保存: {config_file}")
+        return True
+    except Exception as e:
+        print(f"[WebBox] 配置保存失败: {config_file} - {e}")
+        return False
 
 # ===== JS代码：不拦截链接点击，让浏览器原生处理 =====
 JS_CODE = '''
@@ -382,12 +397,35 @@ function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
     var configFileInput = document.getElementById('configFileInput');
+    var btn = document.querySelector('.btn');
+    btn.textContent = '保存中...';
+    btn.disabled = true;
     pywebview.api.save_and_reload(
         url, titleInput.value.trim(), fullscreenCheck.checked,
         downloadDirInput.value.trim(), configFileInput.value.trim(),
         exePathInput.value.trim(), btnTextInput.value.trim() || '🔧',
         btnPositionSelect.value, btnCustomCssInput.value.trim()
-    );
+    ).then(function(r) {
+        if (r.full_ok === false) {
+            btn.textContent = '❌ 保存失败，请检查路径';
+            btn.style.background = '#e74c3c';
+        } else if (r.ptr_ok === false) {
+            btn.textContent = '⚠️ 已保存，但重启后可能丢失配置';
+            btn.style.background = '#e67e22';
+        } else {
+            btn.textContent = '✅ 保存成功';
+            btn.style.background = '#27ae60';
+        }
+        btn.disabled = false;
+        setTimeout(function() {
+            btn.textContent = '保存';
+            btn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        }, 2000);
+    }).catch(function(err) {
+        btn.textContent = '❌ 保存失败: ' + err;
+        btn.style.background = '#e74c3c';
+        btn.disabled = false;
+    });
 }
 
 function clearBrowsingData() {
@@ -644,17 +682,20 @@ class BrowseApi:
         }
         # 更新全局配置路径，确保后续 load_config() 读取正确的文件
         if config_file.strip():
-            # ⚠️ 必须先存指针再设 _custom_config_path，否则 save_config(target_path=None)
-            # 内部调用 get_config_path() 会返回自定义路径而非默认路径，指针存错位置
-            save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
+            # ⚠️ 指针必须存到默认路径，不能用 target_path=None（会被 _custom_config_path 劫持）
+            ptr_ok = save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=str(get_default_config_path()))
             _custom_config_path = config_file.strip()
-        save_config(config, target_path=config_file.strip() or None)
+            if not ptr_ok:
+                print(f"[WebBox] 指针保存失败！默认路径可能不可写")
+        full_ok = save_config(config, target_path=config_file.strip() or None)
+        if not full_ok:
+            print(f"[WebBox] 完整配置保存失败！路径: {config_file.strip() or '默认'}")
         if browse_window:
             browse_window.load_url(url)
             if fullscreen != current_fullscreen:
                 browse_window.toggle_fullscreen()
                 current_fullscreen = fullscreen
-        return {'ok': True}
+        return {'ok': True, 'ptr_ok': ptr_ok if config_file.strip() else None, 'full_ok': full_ok}
 
 class SettingsApi:
     def get_config(self):
@@ -678,11 +719,15 @@ class SettingsApi:
             'btn_custom_css': btn_custom_css.strip(),
         }
         if config_file.strip():
-            # ⚠️ 必须先存指针再设 _custom_config_path（同 BrowseApi）
-            save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=None)
+            # ⚠️ 指针必须存到默认路径，不能用 target_path=None（会被 _custom_config_path 劫持）
+            ptr_ok = save_config({'url': config['url'], 'title': config['title'], 'fullscreen': config['fullscreen'], 'download_dir': '', 'exe_path': '', 'btn_text': '', 'btn_position': '右下', 'btn_custom_css': '', 'config_file': config_file.strip()}, target_path=str(get_default_config_path()))
             _custom_config_path = config_file.strip()
-        save_config(config, target_path=config_file.strip() or None)
-        return {'ok': True}
+            if not ptr_ok:
+                print(f"[WebBox] 指针保存失败！默认路径可能不可写")
+        full_ok = save_config(config, target_path=config_file.strip() or None)
+        if not full_ok:
+            print(f"[WebBox] 完整配置保存失败！路径: {config_file.strip() or '默认'}")
+        return {'ok': True, 'ptr_ok': ptr_ok if config_file.strip() else None, 'full_ok': full_ok}
 
 # ===== 全局快捷键监听 =====
 def start_hotkey_listener():
