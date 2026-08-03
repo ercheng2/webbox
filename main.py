@@ -11,13 +11,9 @@ from pathlib import Path
 _custom_config_path = None  # 通过 --config 参数指定的配置文件路径
 
 def get_default_config_path():
-    """获取默认配置文件路径（不受 _custom_config_path 影响）"""
-    if sys.platform == 'win32':
-        config_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
-    else:
-        config_dir = Path.home() / '.webbox'
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / 'config.json'
+    """获取默认配置文件路径：exe 同目录下的 config.json（不受 _custom_config_path 影响）"""
+    exe_dir = Path(sys.executable).parent
+    return exe_dir / 'config.json'
 
 def get_config_path():
     if _custom_config_path:
@@ -323,7 +319,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <input type="text" id="downloadDirInput" placeholder="如 D:\\Downloads 或留空">
     </div>
     <div class="field">
-        <label>配置文件路径（留空则用默认路径，不同路径可开不同网页）</label>
+        <label>配置文件路径（留空则默认保存在 exe 同目录下的 config.json）</label>
         <input type="text" id="configFileInput" placeholder="如 D:\\WebBox\\site1.json 或留空">
     </div>
     <div class="field">
@@ -593,12 +589,8 @@ class BrowseApi:
     def clear_browsing_data(self):
         """清除浏览记录：标记清除标记，下次启动时删除WebView2数据"""
         try:
-            # 写一个清除标记文件
-            if sys.platform == 'win32':
-                marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
-            else:
-                marker_dir = Path.home() / '.webbox'
-            marker_dir.mkdir(parents=True, exist_ok=True)
+            # 写一个清除标记文件（exe同目录）
+            marker_dir = Path(sys.executable).parent
             marker_file = marker_dir / '.clear_data'
             marker_file.write_text('1', encoding='utf-8')
             print("[WebBox] 已标记清除，重启后生效")
@@ -786,12 +778,8 @@ def main():
     # 检查是否需要清除浏览数据（上次标记的）
     try:
         import shutil
-        if sys.platform == 'win32':
-            marker_dir = Path(os.environ.get('APPDATA', '.')) / 'WebBox'
-            app_data = os.environ.get('APPDATA', '')
-        else:
-            marker_dir = Path.home() / '.webbox'
-            app_data = ''
+        marker_dir = Path(sys.executable).parent
+        app_data = os.environ.get('APPDATA', '')
         marker_file = marker_dir / '.clear_data'
         if marker_file.exists():
             print("[WebBox] 检测到清除标记，正在清除浏览数据...")
