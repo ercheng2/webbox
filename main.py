@@ -582,6 +582,10 @@ class BrowseApi:
     def get_config(self):
         return load_config()
     
+    def get_monitors(self):
+        """返回显示器列表供设置页面使用（F1快捷键打开设置时需要）"""
+        return get_monitors()
+    
     def reload_page(self):
         if browse_window:
             try:
