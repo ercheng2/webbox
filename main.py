@@ -801,6 +801,8 @@ def get_monitors():
         import ctypes
         from ctypes import wintypes
         
+        user32 = ctypes.windll.user32
+        
         class RECT(ctypes.Structure):
             _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
                        ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
@@ -809,10 +811,13 @@ def get_monitors():
             _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', RECT),
                        ('rcWork', RECT), ('dwFlags', wintypes.DWORD)]
         
+        # 保存回调引用防止GC回收（⚠️ ctypes回调常见坑）
+        _callback_ref = None
+        
         def enum_proc(hMonitor, hdc, lprcMonitor, dwData):
             mi = MONITORINFO()
             mi.cbSize = ctypes.sizeof(MONITORINFO)
-            if ctypes.windll.user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
+            if user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
                 idx = len(monitors)
                 monitors.append({
                     'index': idx,
@@ -829,14 +834,64 @@ def get_monitors():
             return True
         
         MonitorEnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM)
-        ctypes.windll.user32.EnumDisplayMonitors(None, None, MonitorEnumProc(enum_proc), 0)
+        _callback_ref = MonitorEnumProc(enum_proc)  # 保存引用，防止GC回收
+        
+        # 设置argtypes确保参数正确传递
+        user32.EnumDisplayMonitors.argtypes = [wintypes.HDC, ctypes.POINTER(RECT), MonitorEnumProc, wintypes.LPARAM]
+        user32.EnumDisplayMonitors.restype = wintypes.BOOL
+        
+        user32.EnumDisplayMonitors(None, None, _callback_ref, 0)
+        
+        # 如果 EnumDisplayMonitors 只返回了1个显示器，但系统有多个，用 MonitorFromPoint 遍历补检
+        if len(monitors) <= 1:
+            SM_XVIRTUALSCREEN = 76
+            SM_YVIRTUALSCREEN = 77
+            SM_CXVIRTUALSCREEN = 78
+            SM_CYVIRTUALSCREEN = 79
+            
+            vs_x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+            vs_y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+            vs_w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+            vs_h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+            
+            if vs_w > 0 and vs_h > 0:
+                seen = set()
+                monitors2 = []
+                step = 200
+                # 遍历虚拟屏幕的采样点，用 MonitorFromPoint 检测显示器
+                for x in range(vs_x, vs_x + vs_w, step):
+                    for y in range(vs_y, vs_y + vs_h, step):
+                        pt = wintypes.POINT(x, y)
+                        hMonitor = user32.MonitorFromPoint(pt, 1)  # MONITOR_DEFAULTTONEAREST
+                        if hMonitor and hMonitor not in seen:
+                            seen.add(hMonitor)
+                            mi = MONITORINFO()
+                            mi.cbSize = ctypes.sizeof(MONITORINFO)
+                            if user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
+                                idx = len(monitors2)
+                                monitors2.append({
+                                    'index': idx,
+                                    'name': f'显示器{idx+1}',
+                                    'x': mi.rcMonitor.left,
+                                    'y': mi.rcMonitor.top,
+                                    'width': mi.rcMonitor.right - mi.rcMonitor.left,
+                                    'height': mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                    'work_x': mi.rcWork.left,
+                                    'work_y': mi.rcWork.top,
+                                    'work_width': mi.rcWork.right - mi.rcWork.left,
+                                    'work_height': mi.rcWork.bottom - mi.rcWork.top,
+                                })
+                # 如果 MonitorFromPoint 检测到更多显示器，使用新结果
+                if len(monitors2) > len(monitors):
+                    monitors = monitors2
         
         if not monitors:
             # fallback: 至少一个显示器
             monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
     except Exception as e:
         print(f"[WebBox] 检测显示器失败: {e}")
-        monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
+        if not monitors:
+            monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
     
     print(f"[WebBox] 检测到 {len(monitors)} 个显示器: {[(m['name'], m['width'], m['height']) for m in monitors]}")
     return monitors
