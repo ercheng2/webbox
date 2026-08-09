@@ -25,7 +25,7 @@ def get_config_path():
 def load_config():
     global _custom_config_path
     config_file = get_config_path()
-    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'download_dir': '', 'config_file': str(get_config_path())}
+    default = {'url': '', 'title': 'WebBox', 'fullscreen': True, 'display': 0, 'download_dir': '', 'config_file': str(get_config_path())}
     if config_file.exists():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -320,6 +320,12 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
         <label for="fullscreenCheck">全屏模式</label>
     </div>
     <div class="field">
+        <label>🖥 显示器选择</label>
+        <select id="displaySelect" style="width:100%;padding:14px 16px;border:2px solid #e0e0e0;border-radius:10px;font-size:16px;">
+            <option value="0">显示器1</option>
+        </select>
+    </div>
+    <div class="field">
         <label>下载保存路径（留空则默认 Downloads/WebBox）</label>
         <input type="text" id="downloadDirInput" placeholder="如 D:\\Downloads 或留空">
     </div>
@@ -353,6 +359,7 @@ input[type="text"]:focus { border-color: #667eea; outline: none; }
 var urlInput = document.getElementById('urlInput');
 var titleInput = document.getElementById('titleInput');
 var fullscreenCheck = document.getElementById('fullscreenCheck');
+var displaySelect = document.getElementById('displaySelect');
 var downloadDirInput = document.getElementById('downloadDirInput');
 var exePathInput = document.getElementById('exePathInput');
 var btnTextInput = document.getElementById('btnTextInput');
@@ -370,6 +377,7 @@ function loadConfig() {
             if (c.url) urlInput.value = c.url;
             if (c.title) titleInput.value = c.title;
             fullscreenCheck.checked = c.fullscreen !== false;
+            if (c.display !== undefined) displaySelect.value = c.display;
             if (c.download_dir) downloadDirInput.value = c.download_dir;
             if (c.exe_path) exePathInput.value = c.exe_path;
             if (c.btn_text) btnTextInput.value = c.btn_text;
@@ -388,6 +396,28 @@ function loadConfig() {
 window.addEventListener('pywebviewready', loadConfig);
 setTimeout(loadConfig, 300);
 
+// 动态加载显示器列表
+function loadMonitors() {
+    if (window.pywebview && window.pywebview.api) {
+        pywebview.api.get_monitors().then(function(monitors) {
+            displaySelect.innerHTML = '';
+            monitors.forEach(function(m) {
+                var opt = document.createElement('option');
+                opt.value = m.index;
+                opt.textContent = m.name + ' (' + m.width + 'x' + m.height + ')';
+                displaySelect.appendChild(opt);
+            });
+            // 加载配置后恢复选中值
+            loadConfig();
+        }).catch(function() {
+            setTimeout(loadMonitors, 200);
+        });
+    } else {
+        setTimeout(loadMonitors, 200);
+    }
+}
+setTimeout(loadMonitors, 100);
+
 function saveAndReload() {
     var url = urlInput.value.trim();
     if (!url) { alert('请输入网址'); return; }
@@ -398,7 +428,8 @@ function saveAndReload() {
         url, titleInput.value.trim(), fullscreenCheck.checked,
         downloadDirInput.value.trim(), '',
         exePathInput.value.trim(), btnTextInput.value.trim() || '🔧',
-        btnPositionSelect.value, btnCustomCssInput.value.trim()
+        btnPositionSelect.value, btnCustomCssInput.value.trim(),
+        parseInt(displaySelect.value) || 0
     ).then(function(r) {
         if (r.full_ok === false) {
             btn.textContent = '❌ 保存失败，请检查路径';
@@ -666,7 +697,7 @@ class BrowseApi:
             browse_window.evaluate_js('window.location.href = {};'.format(json.dumps(href)))
         return {'action': 'navigate'}
     
-    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css='', display=0):
         global browse_window, current_fullscreen, _custom_config_path
         url = url.strip()
         if not url:
@@ -677,6 +708,7 @@ class BrowseApi:
             'url': url, 
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
+            'display': display,
             'download_dir': download_dir.strip(),
             'exe_path': exe_path.strip(),
             'btn_text': btn_text.strip() or '🔧',
@@ -704,7 +736,11 @@ class SettingsApi:
     def get_config(self):
         return load_config()
     
-    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css=''):
+    def get_monitors(self):
+        """返回显示器列表供设置页面使用"""
+        return get_monitors()
+    
+    def save_and_reload(self, url, title, fullscreen, download_dir='', config_file='', exe_path='', btn_text='', btn_position='右下', btn_custom_css='', display=0):
         global _custom_config_path
         url = url.strip()
         if not url:
@@ -715,6 +751,7 @@ class SettingsApi:
             'url': url, 
             'title': title.strip() or 'WebBox',
             'fullscreen': fullscreen,
+            'display': display,
             'download_dir': download_dir.strip(),
             'exe_path': exe_path.strip(),
             'btn_text': btn_text.strip() or '🔧',
@@ -756,20 +793,60 @@ def start_hotkey_listener():
     except Exception as e:
         print(f"快捷键监听失败: {e}")
 
-# ===== 获取屏幕工作区尺寸 =====
-def get_screen_size():
+# ===== 获取所有显示器信息 =====
+def get_monitors():
+    """返回显示器列表 [{'index':0, 'name':'显示器1', 'x':0, 'y':0, 'width':1920, 'height':1040}, ...]"""
+    monitors = []
     try:
         import ctypes
+        from ctypes import wintypes
+        
         class RECT(ctypes.Structure):
             _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
                        ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
-        rect = RECT()
-        ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)
-        width = rect.right - rect.left
-        height = rect.bottom - rect.top
-        return width, height
-    except:
-        return 1920, 1040
+        
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', RECT),
+                       ('rcWork', RECT), ('dwFlags', wintypes.DWORD)]
+        
+        def enum_proc(hMonitor, hdc, lprcMonitor, dwData):
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if ctypes.windll.user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
+                idx = len(monitors)
+                monitors.append({
+                    'index': idx,
+                    'name': f'显示器{idx+1}',
+                    'x': mi.rcMonitor.left,
+                    'y': mi.rcMonitor.top,
+                    'width': mi.rcMonitor.right - mi.rcMonitor.left,
+                    'height': mi.rcMonitor.bottom - mi.rcMonitor.top,
+                    'work_x': mi.rcWork.left,
+                    'work_y': mi.rcWork.top,
+                    'work_width': mi.rcWork.right - mi.rcWork.left,
+                    'work_height': mi.rcWork.bottom - mi.rcWork.top,
+                })
+            return True
+        
+        MonitorEnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM)
+        ctypes.windll.user32.EnumDisplayMonitors(None, None, MonitorEnumProc(enum_proc), 0)
+        
+        if not monitors:
+            # fallback: 至少一个显示器
+            monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
+    except Exception as e:
+        print(f"[WebBox] 检测显示器失败: {e}")
+        monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
+    
+    print(f"[WebBox] 检测到 {len(monitors)} 个显示器: {[(m['name'], m['width'], m['height']) for m in monitors]}")
+    return monitors
+
+def get_monitor_info(display_index=0):
+    """获取指定显示器的信息"""
+    monitors = get_monitors()
+    if 0 <= display_index < len(monitors):
+        return monitors[display_index]
+    return monitors[0]
 
 # ===== 主程序 =====
 def main():
@@ -815,7 +892,12 @@ def main():
     webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
     
     config = load_config()
-    screen_width, screen_height = get_screen_size()
+    monitor = get_monitor_info(config.get('display', 0))
+    screen_width = monitor['work_width']
+    screen_height = monitor['work_height']
+    display_x = monitor['work_x']
+    display_y = monitor['work_y']
+    print(f"[WebBox] 使用显示器: {monitor['name']} ({screen_width}x{screen_height} @ {display_x},{display_y})")
     current_fullscreen = config.get('fullscreen', True)
     
     hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
@@ -834,8 +916,8 @@ def main():
         if not fullscreen:
             window_args['width'] = screen_width
             window_args['height'] = screen_height
-            window_args['x'] = 0
-            window_args['y'] = 0
+        window_args['x'] = display_x
+        window_args['y'] = display_y
         
         browse_window = webview.create_window(**window_args)
         
