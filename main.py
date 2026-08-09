@@ -795,13 +795,66 @@ def start_hotkey_listener():
 
 # ===== 获取所有显示器信息 =====
 def get_monitors():
-    """返回显示器列表 [{'index':0, 'name':'显示器1', 'x':0, 'y':0, 'width':1920, 'height':1040}, ...]"""
+    """返回显示器列表 [{'index':0, 'name':'显示器1', 'x':0, 'y':0, 'width':1920, 'height':1040}, ...]
+    
+    使用 EnumDisplayDevices + EnumDisplaySettings 枚举显示器（不依赖 EnumDisplayMonitors 回调，
+    避免 ctypes 回调在 pywebview 打包环境中的 GC/调用约定问题）。
+    """
     monitors = []
     try:
         import ctypes
         from ctypes import wintypes
         
         user32 = ctypes.windll.user32
+        
+        DISPLAY_DEVICE_ACTIVE = 0x00000001
+        ENUM_CURRENT_SETTINGS = -1
+        
+        class DISPLAY_DEVICEW(ctypes.Structure):
+            _fields_ = [
+                ('cb', wintypes.DWORD),
+                ('DeviceName', wintypes.WCHAR * 32),
+                ('DeviceString', wintypes.WCHAR * 128),
+                ('StateFlags', wintypes.DWORD),
+                ('DeviceID', wintypes.WCHAR * 128),
+                ('DeviceKey', wintypes.WCHAR * 128),
+            ]
+        
+        class POINTL(ctypes.Structure):
+            _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
+        
+        class DEVMODEW(ctypes.Structure):
+            _fields_ = [
+                ('dmDeviceName', wintypes.WCHAR * 32),
+                ('dmSpecVersion', wintypes.WORD),
+                ('dmDriverVersion', wintypes.WORD),
+                ('dmSize', wintypes.WORD),
+                ('dmDriverExtra', wintypes.WORD),
+                ('dmFields', wintypes.DWORD),
+                ('dmPosition', POINTL),
+                ('dmDisplayOrientation', wintypes.DWORD),
+                ('dmDisplayFixedOutput', wintypes.DWORD),
+                ('dmColor', wintypes.SHORT),
+                ('dmDuplex', wintypes.SHORT),
+                ('dmYResolution', wintypes.SHORT),
+                ('dmTTOption', wintypes.SHORT),
+                ('dmCollate', wintypes.SHORT),
+                ('dmFormName', wintypes.WCHAR * 32),
+                ('dmLogPixels', wintypes.WORD),
+                ('dmBitsPerPel', wintypes.DWORD),
+                ('dmPelsWidth', wintypes.DWORD),
+                ('dmPelsHeight', wintypes.DWORD),
+                ('dmDisplayFlags', wintypes.DWORD),
+                ('dmDisplayFrequency', wintypes.DWORD),
+                ('dmICMMethod', wintypes.DWORD),
+                ('dmICMIntent', wintypes.DWORD),
+                ('dmMediaType', wintypes.DWORD),
+                ('dmDitherType', wintypes.DWORD),
+                ('dmReserved1', wintypes.DWORD),
+                ('dmReserved2', wintypes.DWORD),
+                ('dmPanningWidth', wintypes.DWORD),
+                ('dmPanningHeight', wintypes.DWORD),
+            ]
         
         class RECT(ctypes.Structure):
             _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
@@ -811,14 +864,41 @@ def get_monitors():
             _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', RECT),
                        ('rcWork', RECT), ('dwFlags', wintypes.DWORD)]
         
-        # 保存回调引用防止GC回收（⚠️ ctypes回调常见坑）
-        _callback_ref = None
+        # 第一步：EnumDisplayDevices 枚举所有活跃的显示设备
+        devices = []
+        i = 0
+        while True:
+            dd = DISPLAY_DEVICEW()
+            dd.cb = ctypes.sizeof(DISPLAY_DEVICEW)
+            if not user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
+                break
+            if dd.StateFlags & DISPLAY_DEVICE_ACTIVE:
+                # 获取当前显示设置
+                dm = DEVMODEW()
+                dm.dmSize = ctypes.sizeof(DEVMODEW)
+                if user32.EnumDisplaySettingsW(dd.DeviceName, ENUM_CURRENT_SETTINGS, ctypes.byref(dm)):
+                    devices.append({
+                        'name': dd.DeviceName,
+                        'x': dm.dmPosition.x,
+                        'y': dm.dmPosition.y,
+                        'width': dm.dmPelsWidth,
+                        'height': dm.dmPelsHeight,
+                    })
+            i += 1
         
-        def enum_proc(hMonitor, hdc, lprcMonitor, dwData):
+        print(f"[WebBox] EnumDisplayDevices 找到 {len(devices)} 个活跃设备: {[(d['name'], d['width'], d['height'], d['x'], d['y']) for d in devices]}")
+        
+        # 第二步：对每个设备，用 MonitorFromPoint 获取 HMONITOR，再获取工作区域
+        for idx, dev in enumerate(devices):
+            # 取设备中心点来定位 HMONITOR
+            cx = dev['x'] + dev['width'] // 2
+            cy = dev['y'] + dev['height'] // 2
+            pt = wintypes.POINT(cx, cy)
+            hMonitor = user32.MonitorFromPoint(pt, 1)  # MONITOR_DEFAULTTONEAREST
+            
             mi = MONITORINFO()
             mi.cbSize = ctypes.sizeof(MONITORINFO)
-            if user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
-                idx = len(monitors)
+            if hMonitor and user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
                 monitors.append({
                     'index': idx,
                     'name': f'显示器{idx+1}',
@@ -831,59 +911,20 @@ def get_monitors():
                     'work_width': mi.rcWork.right - mi.rcWork.left,
                     'work_height': mi.rcWork.bottom - mi.rcWork.top,
                 })
-            return True
-        
-        MonitorEnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM)
-        _callback_ref = MonitorEnumProc(enum_proc)  # 保存引用，防止GC回收
-        
-        # 设置argtypes确保参数正确传递
-        user32.EnumDisplayMonitors.argtypes = [wintypes.HDC, ctypes.POINTER(RECT), MonitorEnumProc, wintypes.LPARAM]
-        user32.EnumDisplayMonitors.restype = wintypes.BOOL
-        
-        user32.EnumDisplayMonitors(None, None, _callback_ref, 0)
-        
-        # 如果 EnumDisplayMonitors 只返回了1个显示器，但系统有多个，用 MonitorFromPoint 遍历补检
-        if len(monitors) <= 1:
-            SM_XVIRTUALSCREEN = 76
-            SM_YVIRTUALSCREEN = 77
-            SM_CXVIRTUALSCREEN = 78
-            SM_CYVIRTUALSCREEN = 79
-            
-            vs_x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-            vs_y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-            vs_w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-            vs_h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
-            
-            if vs_w > 0 and vs_h > 0:
-                seen = set()
-                monitors2 = []
-                step = 200
-                # 遍历虚拟屏幕的采样点，用 MonitorFromPoint 检测显示器
-                for x in range(vs_x, vs_x + vs_w, step):
-                    for y in range(vs_y, vs_y + vs_h, step):
-                        pt = wintypes.POINT(x, y)
-                        hMonitor = user32.MonitorFromPoint(pt, 1)  # MONITOR_DEFAULTTONEAREST
-                        if hMonitor and hMonitor not in seen:
-                            seen.add(hMonitor)
-                            mi = MONITORINFO()
-                            mi.cbSize = ctypes.sizeof(MONITORINFO)
-                            if user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
-                                idx = len(monitors2)
-                                monitors2.append({
-                                    'index': idx,
-                                    'name': f'显示器{idx+1}',
-                                    'x': mi.rcMonitor.left,
-                                    'y': mi.rcMonitor.top,
-                                    'width': mi.rcMonitor.right - mi.rcMonitor.left,
-                                    'height': mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                    'work_x': mi.rcWork.left,
-                                    'work_y': mi.rcWork.top,
-                                    'work_width': mi.rcWork.right - mi.rcWork.left,
-                                    'work_height': mi.rcWork.bottom - mi.rcWork.top,
-                                })
-                # 如果 MonitorFromPoint 检测到更多显示器，使用新结果
-                if len(monitors2) > len(monitors):
-                    monitors = monitors2
+            else:
+                # 降级：使用 EnumDisplaySettings 的值
+                monitors.append({
+                    'index': idx,
+                    'name': f'显示器{idx+1}',
+                    'x': dev['x'],
+                    'y': dev['y'],
+                    'width': dev['width'],
+                    'height': dev['height'],
+                    'work_x': dev['x'],
+                    'work_y': dev['y'],
+                    'work_width': dev['width'],
+                    'work_height': dev['height'] - 40,
+                })
         
         if not monitors:
             # fallback: 至少一个显示器
@@ -893,7 +934,7 @@ def get_monitors():
         if not monitors:
             monitors.append({'index': 0, 'name': '显示器1', 'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'work_x': 0, 'work_y': 0, 'work_width': 1920, 'work_height': 1040})
     
-    print(f"[WebBox] 检测到 {len(monitors)} 个显示器: {[(m['name'], m['width'], m['height']) for m in monitors]}")
+    print(f"[WebBox] 最终检测到 {len(monitors)} 个显示器: {[(m['name'], m['width'], m['height']) for m in monitors]}")
     return monitors
 
 def get_monitor_info(display_index=0):
