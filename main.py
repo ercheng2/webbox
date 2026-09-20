@@ -202,6 +202,20 @@ JS_CODE = '''
         document.body.appendChild(btn);
     };
     
+    // ===== 显示试用提示条 =====
+    window.__webbox_show_trial_bar = function(cfg) {
+        var old = document.getElementById('__webbox_trial_bar');
+        if (old) old.remove();
+        if (!cfg) return;
+        var bar = document.createElement('div');
+        bar.id = '__webbox_trial_bar';
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#1a2980;color:#fff;font-size:13px;padding:8px 14px;display:flex;align-items:center;justify-content:center;gap:10px;font-family:"Microsoft YaHei",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.25);';
+        bar.innerHTML = '<span>WebBox 试用版 · 剩余 <b style="color:#ffd166">' + cfg.days_left + '</b> 天</span>' +
+            '<button onclick="pywebview.api.open_activation()" style="background:#fff;color:#1a2980;border:none;border-radius:4px;padding:4px 14px;cursor:pointer;font-weight:600;">立即激活</button>' +
+            '<span style="cursor:pointer;font-size:16px;opacity:0.7;" onclick="this.parentNode.remove()">×</span>';
+        document.body.appendChild(bar);
+    };
+    
     // ===== 拦截window.open：改为同窗口导航 =====
     window.open = function(url, target, features) {
         if (url && !url.startsWith('javascript:') && !url.startsWith('#')) {
@@ -607,6 +621,7 @@ init();
 # ===== 全局变量 =====
 browse_window = None
 current_fullscreen = True
+activation_window = None
 
 # ===== 下载目录 =====
 def get_download_dir():
@@ -746,6 +761,21 @@ class BrowseApi:
             return {'ok': True}
         except Exception as e:
             print(f"[WebBox] 打开EXE失败: {e}")
+            return {'ok': False, 'error': str(e)}
+    
+    def open_activation(self):
+        """打开激活/注册窗口"""
+        global activation_window
+        try:
+            if activation_window:
+                try:
+                    activation_window.destroy()
+                except:
+                    pass
+            activation_window = webview.create_window('WebBox 激活', html=ACTIVATION_HTML, js_api=LicenseApi(), width=520, height=660, resizable=False)
+            return {'ok': True}
+        except Exception as e:
+            print(f"[WebBox] 打开激活窗口失败: {e}")
             return {'ok': False, 'error': str(e)}
     
     def save_float_btn_position(self, top, left):
@@ -950,9 +980,15 @@ class LicenseApi(BrowseApi):
         }
 
     def enter_main(self):
-        global browse_window, current_fullscreen
+        global browse_window, current_fullscreen, activation_window
         try:
             config = load_config()
+            if activation_window:
+                try:
+                    activation_window.destroy()
+                except:
+                    pass
+                activation_window = None
             if browse_window and config.get('url'):
                 browse_window.load_url(config['url'])
                 try:
@@ -1241,6 +1277,10 @@ def main():
                 }
                 if float_cfg['exe_path']:
                     browse_window.evaluate_js('window.__webbox_setup_float_btn(' + json.dumps(float_cfg) + ')')
+                # 试用提示条（试用期内显示，含激活入口）
+                _lic = license_core.check_license()
+                if _lic['status'] == 'trial':
+                    browse_window.evaluate_js('window.__webbox_show_trial_bar(' + json.dumps({'days_left': _lic['days_left']}) + ')')
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:

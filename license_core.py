@@ -17,7 +17,7 @@ from pathlib import Path
 
 # ===== 密钥（发布前可修改，keygen 必须用同一个） =====
 _SECRET = b"YDC-WebBox-Licensed-2026!@#"
-_TRIAL_DAYS = 30
+_TRIAL_DAYS = 3
 
 # ===== 授权文件路径 =====
 def _license_dir():
