@@ -8,8 +8,10 @@ import time
 import logging
 from pathlib import Path
 
+import license_core
+
 # ===== 版本号 =====
-VERSION = '3.19'
+VERSION = '3.20'  # 加入授权系统
 
 # ===== 日志 =====
 def setup_logging():
@@ -447,9 +449,136 @@ window.addEventListener('keydown', function(e) {
 </body>
 </html>'''
 
+# ===== 激活页面HTML =====
+ACTIVATION_HTML = '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Microsoft YaHei", Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.container { background: white; padding: 40px; border-radius: 20px; width: 100%; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+h2 { margin: 0 0 10px; color: #333; text-align: center; font-size: 24px; }
+.status { text-align: center; margin-bottom: 20px; padding: 12px; border-radius: 10px; font-size: 14px; }
+.status.trial { background: #fff3cd; color: #856404; }
+.status.expired { background: #f8d7da; color: #721c24; }
+.status.tampered { background: #f8d7da; color: #721c24; }
+.status.ok { background: #d4edda; color: #155724; }
+.field { margin-bottom: 20px; }
+label { display: block; margin-bottom: 8px; color: #555; font-size: 14px; font-weight: 500; }
+.machine-code { background: #f1f3f5; padding: 14px; border-radius: 8px; font-family: Consolas, monospace; font-size: 15px; letter-spacing: 1px; text-align: center; color: #333; user-select: all; cursor: pointer; word-break: break-all; }
+input[type="text"] { width: 100%; padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 15px; font-family: Consolas, monospace; letter-spacing: 1px; text-transform: uppercase; }
+input[type="text"]:focus { border-color: #667eea; outline: none; }
+.btn { width: 100%; padding: 15px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; transition: all 0.2s; }
+.btn:hover { box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+.btn-copy { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; background: #f8f9fa; color: #555; cursor: pointer; margin-top: 8px; }
+.msg { margin-top: 14px; padding: 12px; border-radius: 8px; font-size: 14px; text-align: center; display: none; }
+.msg.success { display: block; background: #d4edda; color: #155724; }
+.msg.error { display: block; background: #f8d7da; color: #721c24; }
+.hint { margin-top: 16px; font-size: 12px; color: #999; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h2>🔐 WebBox 授权</h2>
+    <div id="statusBox" class="status">加载中...</div>
+    <div class="field">
+        <label>机器码（请发送给软件提供方）</label>
+        <div class="machine-code" id="machineCode">加载中...</div>
+        <button class="btn-copy" onclick="copyCode()">📋 复制机器码</button>
+    </div>
+    <div class="field">
+        <label>激活码</label>
+        <input type="text" id="keyInput" placeholder="输入激活码，如 XXXX-XXXX-XXXX-XXXX">
+    </div>
+    <button class="btn" id="activateBtn" onclick="activate()">激 活</button>
+    <div id="msg" class="msg"></div>
+    <div class="hint">激活码由软件提供方根据您的机器码生成，<br>绑定本机硬件，永久有效。</div>
+</div>
+<script>
+var machineCode = '';
+
+function loadInfo() {
+    if (!window.pywebview || !window.pywebview.api) {
+        setTimeout(loadInfo, 200);
+        return;
+    }
+    pywebview.api.get_license_info().then(function(info) {
+        machineCode = info.machine_code || '';
+        document.getElementById('machineCode').textContent = machineCode;
+        var statusBox = document.getElementById('statusBox');
+        var status = info.status;
+        if (status === 'trial') {
+            statusBox.className = 'status trial';
+            statusBox.textContent = '⏳ ' + (info.message || ('试用期剩余 ' + info.days_left + ' 天'));
+        } else if (status === 'expired') {
+            statusBox.className = 'status expired';
+            statusBox.textContent = '❌ ' + (info.message || '试用期已结束，请输入激活码');
+        } else if (status === 'tampered') {
+            statusBox.className = 'status tampered';
+            statusBox.textContent = '⚠️ ' + (info.message || '系统时间异常');
+        } else {
+            statusBox.className = 'status ok';
+            statusBox.textContent = '✅ 已激活';
+        }
+    }).catch(function() {
+        setTimeout(loadInfo, 300);
+    });
+}
+
+function showMsg(type, text) {
+    var msg = document.getElementById('msg');
+    msg.className = 'msg ' + type;
+    msg.textContent = text;
+}
+
+function copyCode() {
+    var el = document.getElementById('machineCode');
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    try { document.execCommand('copy'); } catch(e) {}
+    showMsg('success', '✅ 机器码已复制');
+    setTimeout(function(){ document.getElementById('msg').className = 'msg'; }, 2000);
+}
+
+function activate() {
+    var key = document.getElementById('keyInput').value.trim();
+    if (!key) { showMsg('error', '请输入激活码'); return; }
+    var btn = document.getElementById('activateBtn');
+    btn.textContent = '激活中...';
+    btn.disabled = true;
+    pywebview.api.do_activate(key).then(function(result) {
+        btn.textContent = '激 活';
+        btn.disabled = false;
+        if (result && result.success) {
+            showMsg('success', '✅ ' + (result.message || '激活成功'));
+            setTimeout(function() {
+                pywebview.api.enter_main();
+            }, 800);
+        } else {
+            showMsg('error', '❌ ' + ((result && result.message) || '激活失败'));
+        }
+    }).catch(function(err) {
+        btn.textContent = '激 活';
+        btn.disabled = false;
+        showMsg('error', '❌ 激活出错：' + err);
+    });
+}
+
+window.addEventListener('pywebviewready', loadInfo);
+setTimeout(loadInfo, 300);
+</script>
+</body>
+</html>'''
+
 # ===== 全局变量 =====
 browse_window = None
 current_fullscreen = True
+license_result = None      # 授权状态（启动时 check_license 填充）
+activation_window = None   # 激活小窗口引用
 
 # ===== 下载目录 =====
 def get_download_dir():
@@ -663,6 +792,18 @@ class BrowseApi:
         logging.info(f'保存成功，实际配置路径: {actual_path}')
         return result
 
+    def open_activation(self):
+        """打开激活窗口（试用期内点击顶栏「去激活」时调用）"""
+        global activation_window, license_result
+        license_result = license_core.check_license()  # 刷新状态
+        activation_window = webview.create_window(
+            'WebBox 激活',
+            html=ACTIVATION_HTML,
+            js_api=LicenseApi(),
+            width=520, height=660, resizable=False
+        )
+        return {'ok': True}
+
 class SettingsApi:
     def get_config(self):
         return load_config()
@@ -686,6 +827,63 @@ class SettingsApi:
         result['config_file'] = str(actual_path)
         logging.info(f'保存完成，实际配置路径: {actual_path}, 结果: {result}')
         return result
+
+class LicenseApi(BrowseApi):
+    """授权窗口的 API，继承 BrowseApi 以复用浏览相关方法"""
+
+    def get_license_info(self):
+        global license_result
+        if license_result is None:
+            license_result = license_core.check_license()
+        return {
+            'machine_code': license_result.get('machine_code', ''),
+            'status': license_result.get('status', 'trial'),
+            'days_left': license_result.get('days_left', 0),
+            'message': license_result.get('message', ''),
+            'activated': license_result.get('activated', False),
+        }
+
+    def do_activate(self, activation_key):
+        global license_result, browse_window, activation_window
+        if license_result is None:
+            license_result = license_core.check_license()
+        machine_code = license_result.get('machine_code', '') or license_core.get_machine_code_display()
+        result = license_core.activate(machine_code, activation_key)
+        if result['success']:
+            license_result = license_core.check_license()
+            # 试用期场景：存在激活小窗，激活成功后销毁小窗并刷新主窗口
+            if activation_window:
+                try:
+                    activation_window.destroy()
+                except Exception:
+                    pass
+                activation_window = None
+                if browse_window:
+                    try:
+                        browse_window.evaluate_js('location.reload()')
+                    except Exception:
+                        pass
+        return result
+
+    def enter_main(self):
+        """激活成功后，把当前窗口切换到主界面（真实网址或设置页）"""
+        global browse_window, current_fullscreen
+        config = load_config()
+        current_fullscreen = config.get('fullscreen', True)
+        if browse_window and config.get('url'):
+            browse_window.load_url(config['url'])
+            try:
+                browse_window.set_title(config.get('title', 'WebBox'))
+            except Exception:
+                pass
+            if current_fullscreen:
+                try:
+                    browse_window.toggle_fullscreen()
+                except Exception:
+                    pass
+        elif browse_window:
+            browse_window.load_html(SETTINGS_HTML)
+        return {'ok': True}
 
 # ===== 全局快捷键监听 =====
 def start_hotkey_listener():
@@ -728,7 +926,7 @@ def get_screen_size():
 
 # ===== 主程序 =====
 def main():
-    global current_fullscreen, browse_window, _custom_config_path
+    global current_fullscreen, browse_window, _custom_config_path, license_result
     
     # 初始化日志（最先执行）
     setup_logging()
@@ -778,10 +976,19 @@ def main():
     screen_width, screen_height = get_screen_size()
     current_fullscreen = config.get('fullscreen', True)
     
+    # 授权检查
+    license_result = license_core.check_license()
+    status = license_result.get('status')
+    logging.info(f'授权状态: {status}, 剩余天数: {license_result.get("days_left", -1)}')
+    
     hotkey_thread = threading.Thread(target=start_hotkey_listener, daemon=True)
     hotkey_thread.start()
     
-    if config.get('url'):
+    if status in ('expired', 'tampered'):
+        # 未授权/已过期/时间异常：仅显示激活窗口
+        api = LicenseApi()
+        browse_window = webview.create_window('WebBox 授权', html=ACTIVATION_HTML, js_api=api, width=520, height=680, resizable=False)
+    elif config.get('url'):
         api = BrowseApi()
         fullscreen = config.get('fullscreen', True)
         
@@ -809,6 +1016,21 @@ def main():
                     })();
                 ''')
                 browse_window.evaluate_js(JS_CODE)
+                # 试用期顶部提示条
+                if license_result and license_result.get('status') == 'trial':
+                    days = license_result.get('days_left', 0)
+                    browse_window.evaluate_js('''
+                        (function() {
+                            var d = document.createElement('div');
+                            d.id = '__webbox_trial_banner';
+                            d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:rgba(255,193,7,0.96);color:#333;padding:8px 16px;font-size:13px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
+                            d.innerHTML = '⏳ WebBox 试用期剩余 %d 天 · <a href="javascript:void(0)" style="color:#1565c0;text-decoration:underline" onclick="window.__webbox_open_activation()">去激活</a>';
+                            document.body.appendChild(d);
+                            window.__webbox_open_activation = function() {
+                                if (window.pywebview && window.pywebview.api) { pywebview.api.open_activation(); }
+                            };
+                        })();
+                    ''' % days)
                 if fullscreen:
                     browse_window.toggle_fullscreen()
                 else:
