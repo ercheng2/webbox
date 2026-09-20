@@ -18,6 +18,7 @@ from pathlib import Path
 # ===== 密钥（发布前可修改，keygen 必须用同一个） =====
 _SECRET = b"YDC-WebBox-Licensed-2026!@#"
 _TRIAL_DAYS = 3
+_CREATE_NO_WINDOW = 0x08000000 if sys.platform == 'win32' else 0
 
 # ===== 授权文件路径 =====
 def _license_dir():
@@ -40,7 +41,7 @@ def get_machine_id():
     try:
         import subprocess
         r = subprocess.run(['wmic', 'cpu', 'get', 'ProcessorId'],
-                           capture_output=True, text=True, timeout=10)
+                           capture_output=True, text=True, timeout=10, creationflags=_CREATE_NO_WINDOW)
         lines = r.stdout.strip().split('\n')
         if len(lines) >= 2:
             v = lines[1].strip()
@@ -53,7 +54,7 @@ def get_machine_id():
     try:
         import subprocess
         r = subprocess.run(['wmic', 'baseboard', 'get', 'SerialNumber'],
-                           capture_output=True, text=True, timeout=10)
+                           capture_output=True, text=True, timeout=10, creationflags=_CREATE_NO_WINDOW)
         lines = r.stdout.strip().split('\n')
         if len(lines) >= 2:
             v = lines[1].strip()
@@ -66,7 +67,7 @@ def get_machine_id():
     try:
         import subprocess
         r = subprocess.run(['wmic', 'diskdrive', 'get', 'SerialNumber'],
-                           capture_output=True, text=True, timeout=10)
+                           capture_output=True, text=True, timeout=10, creationflags=_CREATE_NO_WINDOW)
         lines = r.stdout.strip().split('\n')
         if len(lines) >= 2:
             v = lines[1].strip()
