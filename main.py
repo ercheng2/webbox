@@ -986,19 +986,27 @@ def _copy_to_clipboard(text):
         return False
     try:
         import ctypes
+        k32 = ctypes.windll.kernel32
+        u32 = ctypes.windll.user32
+        # 64 位下必须设 restype，否则句柄被截断为 32 位
+        k32.GlobalAlloc.restype = ctypes.c_void_p
+        k32.GlobalLock.restype = ctypes.c_void_p
         CF_UNICODETEXT = 13
-        GMEM_MOVEABLE = 0x0002
-        GMEM_ZEROINIT = 0x0040
         data = text.encode('utf-16-le') + bytes(2)
-        h = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len(data))
-        p = ctypes.windll.kernel32.GlobalLock(h)
+        h = k32.GlobalAlloc(0x0042, len(data))  # GMEM_MOVEABLE|GMEM_ZEROINIT
+        if not h:
+            return False
+        p = k32.GlobalLock(h)
+        if not p:
+            return False
         ctypes.memmove(p, data, len(data))
-        ctypes.windll.kernel32.GlobalUnlock(h)
-        ctypes.windll.user32.OpenClipboard(0)
-        ctypes.windll.user32.EmptyClipboard()
-        ctypes.windll.user32.SetClipboardData(CF_UNICODETEXT, h)
-        ctypes.windll.user32.CloseClipboard()
-        return True
+        k32.GlobalUnlock(h)
+        if not u32.OpenClipboard(0):
+            return False
+        u32.EmptyClipboard()
+        r = u32.SetClipboardData(CF_UNICODETEXT, h)
+        u32.CloseClipboard()
+        return bool(r)
     except Exception:
         return False
 
