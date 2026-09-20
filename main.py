@@ -552,7 +552,10 @@ ACTIVATION_HTML = '''
     <div class="hint">激活码需由 WebBox 注册机根据本机机器码生成。请把机器码发给软件提供方换取激活码。若提示时间异常，请先恢复系统正确时间再重启软件。</div>
 </div>
 <script>
+var _init_done = false;
 async function init() {
+    if (_init_done) return;
+    _init_done = true;
     try {
         var info = await pywebview.api.get_license_info();
         document.getElementById('machineCode').textContent = info.machine_code;
@@ -612,7 +615,12 @@ async function doTrial() {
 function enterMain() {
     pywebview.api.enter_main().catch(function(){});
 }
-init();
+if (window.pywebview && window.pywebview.api) {
+    init();
+} else {
+    window.addEventListener('pywebviewready', init);
+    setTimeout(init, 300);
+}
 </script>
 </body>
 </html>
