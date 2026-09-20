@@ -581,9 +581,21 @@ async function init() {
 }
 function copyMachine() {
     var t = document.getElementById('machineCode').textContent;
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(t).then(function(){ showMsg('已复制机器码','ok'); }).catch(function(){ showMsg('复制失败，请手动选择复制','err'); });
-    } else { showMsg('复制失败，请手动选择复制','err'); }
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_to_clipboard) {
+        pywebview.api.copy_to_clipboard(t).then(function(r) {
+            if (r && r.ok) { showMsg('已复制机器码','ok'); }
+            else { showMsg('复制失败，请手动选择复制','err'); }
+        }).catch(function() { showMsg('复制失败，请手动选择复制','err'); });
+    } else {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = t; ta.style.position='fixed'; ta.style.left='-9999px';
+            document.body.appendChild(ta); ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showMsg('已复制机器码','ok');
+        } catch(e) { showMsg('复制失败，请手动选择复制','err'); }
+    }
 }
 function showMsg(t, type) {
     var m = document.getElementById('msg');
@@ -967,6 +979,29 @@ def _place_window(browse_window, config):
     except Exception as e:
         print(f"[WebBox] 放置窗口失败: {e}")
 
+# ===== 剪贴板 =====
+def _copy_to_clipboard(text):
+    """写入 Windows 剪贴板（ctypes，无额外依赖）"""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        CF_UNICODETEXT = 13
+        GMEM_MOVEABLE = 0x0002
+        GMEM_ZEROINIT = 0x0040
+        data = text.encode('utf-16-le') + bytes(2)
+        h = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len(data))
+        p = ctypes.windll.kernel32.GlobalLock(h)
+        ctypes.memmove(p, data, len(data))
+        ctypes.windll.kernel32.GlobalUnlock(h)
+        ctypes.windll.user32.OpenClipboard(0)
+        ctypes.windll.user32.EmptyClipboard()
+        ctypes.windll.user32.SetClipboardData(CF_UNICODETEXT, h)
+        ctypes.windll.user32.CloseClipboard()
+        return True
+    except Exception:
+        return False
+
 # ===== 授权窗口 API =====
 class LicenseApi(BrowseApi):
     def get_license_info(self):
@@ -986,6 +1021,11 @@ class LicenseApi(BrowseApi):
             'ok': result.get('success', False),
             'error': '' if result.get('success') else result.get('message', '激活失败'),
         }
+
+    def copy_to_clipboard(self, text):
+        """JS 调用：复制文本到剪贴板"""
+        ok = _copy_to_clipboard(text or '')
+        return {'ok': ok}
 
     def enter_main(self):
         global browse_window, current_fullscreen, activation_window
