@@ -981,32 +981,38 @@ def _place_window(browse_window, config):
 
 # ===== 剪贴板 =====
 def _copy_to_clipboard(text):
-    """写入 Windows 剪贴板（ctypes，无额外依赖）"""
+    """写入 Windows 剪贴板"""
     if sys.platform != 'win32':
         return False
+    # 优先用 PowerShell（打包后最可靠）
+    try:
+        import subprocess
+        r = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', 'Set-Clipboard', '-Value', text],
+            creationflags=0x08000000, timeout=5, capture_output=True)
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+    # 备选：ctypes 直调 Win32 API
     try:
         import ctypes
         k32 = ctypes.windll.kernel32
         u32 = ctypes.windll.user32
-        # 64 位下必须设 restype，否则句柄被截断为 32 位
         k32.GlobalAlloc.restype = ctypes.c_void_p
         k32.GlobalLock.restype = ctypes.c_void_p
-        CF_UNICODETEXT = 13
         data = text.encode('utf-16-le') + bytes(2)
-        h = k32.GlobalAlloc(0x0042, len(data))  # GMEM_MOVEABLE|GMEM_ZEROINIT
-        if not h:
-            return False
+        h = k32.GlobalAlloc(0x0042, len(data))
+        if not h: return False
         p = k32.GlobalLock(h)
-        if not p:
-            return False
+        if not p: return False
         ctypes.memmove(p, data, len(data))
         k32.GlobalUnlock(h)
-        if not u32.OpenClipboard(0):
-            return False
+        if not u32.OpenClipboard(0): return False
         u32.EmptyClipboard()
-        r = u32.SetClipboardData(CF_UNICODETEXT, h)
+        r2 = u32.SetClipboardData(13, h)
         u32.CloseClipboard()
-        return bool(r)
+        return bool(r2)
     except Exception:
         return False
 
